@@ -9,52 +9,95 @@ export const day17: DayContent = {
   resourceLink: "https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/runtime/use-terraform",
   codeSnippets: [
     {
-      filename: "terraform/runtime/main.tf",
+      filename: "terraform/foundation/main.tf",
       language: "hcl",
-      code: `# Persisted in GCS via: terraform init -backend-config="bucket=\${TF_BUCKET}" -backend-config="prefix=agent-demo/runtime"
-terraform {
-  backend "gcs" {}
-  required_providers {
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = ">= 6.25.0"
+      code: `# 1. Ingress & Egress Agent Gateways (CLIENT_TO_AGENT & AGENT_TO_ANYWHERE)
+resource "google_network_services_agent_gateway" "ingress" {
+  provider  = google-beta
+  name      = "agent-demo-ingress"
+  location  = var.region
+  protocols = ["MCP"]
+  google_managed {
+    governed_access_path = "CLIENT_TO_AGENT"
+  }
+}
+
+resource "google_network_services_agent_gateway" "egress" {
+  provider  = google-beta
+  name      = "agent-demo-egress"
+  location  = var.region
+  protocols = ["MCP"]
+  google_managed {
+    governed_access_path = "AGENT_TO_ANYWHERE"
+  }
+  network_config {
+    egress {
+      network_attachment = google_compute_network_attachment.agent_gateway.id
     }
   }
 }
 
-# Read foundational outputs (Artifact Registry, VPC, Model Armor, Service Account) from GCS state
-data "terraform_remote_state" "foundation" {
-  backend = "gcs"
-  config = {
-    bucket = "\${var.project_id}-terraform-state"
-    prefix = "agent-demo/foundation"
+# 2. Wire Model Armor Template into the Ingress Agent Gateway via Authz Policy
+resource "google_network_services_authz_extension" "ma_extension_ingress" {
+  provider  = google-beta
+  name      = "agent-demo-ma-extension-ingress"
+  location  = var.region
+  service   = "modelarmor.\${var.region}.rep.googleapis.com"
+  timeout   = "3s"
+  fail_open = false
+  metadata = {
+    model_armor_settings = jsonencode([
+      { request_template_id = google_model_armor_template.agent_security.id }
+    ])
   }
 }
 
-# Provision Vertex AI Agent Runtime with cryptographic SPIFFE identity & Model Armor
+resource "google_network_security_authz_policy" "ingress_ma_policy" {
+  provider       = google-beta
+  name           = "agent-demo-ma-ingress-policy"
+  location       = var.region
+  action         = "CUSTOM"
+  policy_profile = "CONTENT_AUTHZ"
+  target {
+    resources = [google_network_services_agent_gateway.ingress.id]
+  }
+  custom_provider {
+    authz_extension {
+      resources = [google_network_services_authz_extension.ma_extension_ingress.id]
+    }
+  }
+}`
+    },
+    {
+      filename: "terraform/runtime/main.tf",
+      language: "hcl",
+      code: `# Deploy ADK Agent Runtime with SPIFFE Identity routed through Ingress & Egress Gateways
 resource "google_vertex_ai_reasoning_engine" "agent" {
   provider     = google-beta
   project      = var.project_id
   region       = var.region
-  display_name = "day17-governed-adk-agent"
+  display_name = "terraform-demo-agent"
+  description  = "ADK agent deployed through Terraform and Cloud Build"
 
   spec {
     agent_framework = "google-adk"
     identity_type   = "AGENT_IDENTITY" # Mints cryptographic SPIFFE ID
-    service_account = data.terraform_remote_state.foundation.outputs.agent_service_account_email
 
     container_spec {
-      image_uri = var.image_uri # Built & pushed to Artifact Registry by Cloud Build
+      image_uri = "\${var.region}-docker.pkg.dev/\${var.project_id}/\${var.repository_name}/demo-agent:\${var.image_tag}"
     }
 
+    class_methods = jsonencode(local.class_methods)
+
+    # Route all client-to-agent and agent-to-anywhere traffic through Agent Gateways
     deployment_spec {
-      env {
-        name  = "GEMINI_MODEL"
-        value = "gemini-3.1-flash-lite"
-      }
-      env {
-        name  = "MODEL_ARMOR_TEMPLATE_ID"
-        value = data.terraform_remote_state.foundation.outputs.model_armor_template_id
+      agent_gateway_config {
+        client_to_agent_config {
+          agent_gateway = var.ingress_gateway_id
+        }
+        agent_to_anywhere_config {
+          agent_gateway = var.egress_gateway_id
+        }
       }
     }
   }
@@ -64,88 +107,40 @@ resource "google_vertex_ai_reasoning_engine" "agent" {
       filename: "cloudbuild.yaml",
       language: "yaml",
       code: `steps:
-  # 1. Foundation: Apply APIs, Artifact Registry, VPC, Model Armor & IAM backed by GCS state
-  - id: "terraform-foundation"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/foundation"
-    entrypoint: "sh"
+  # 1. Foundation: Provision VPC, Agent Gateways, Model Armor & Authz Policies
+  - name: hashicorp/terraform:1.13
+    id: terraform-foundation
+    entrypoint: sh
     args:
-      - "-c"
+      - -c
       - |
+        cd terraform/foundation
         terraform init -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=agent-demo/foundation"
-        terraform plan -var="project_id=\${PROJECT_ID}" -var="region=\${_REGION}" -out=tfplan
-        terraform apply -auto-approve tfplan
+        terraform apply -auto-approve -var="project_id=\${PROJECT_ID}" -var="region=\${_REGION}"
+        terraform output -raw ingress_gateway_id > /workspace/ingress_gateway_id
+        terraform output -raw egress_gateway_id > /workspace/egress_gateway_id
 
-  # 2. Build the agent: Package container image and push to Artifact Registry
-  - id: "build-and-push-agent"
-    name: "gcr.io/cloud-builders/docker"
-    args:
-      - "build"
-      - "-t"
-      - "\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/agent-repo/adk-agent:\${SHORT_SHA}"
-      - "--push"
-      - "."
+  # 2. Build & push the ADK chatbot container to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    id: build-and-push-agent
+    args: ["build", "-t", "\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/agent-images/demo-agent:\${_IMAGE_TAG}", "--push", "./agent"]
 
-  # 3. Provision & deploy: Update Agent Runtime with the newly built container image
-  - id: "terraform-runtime"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/runtime"
-    entrypoint: "sh"
+  # 3. Runtime: Deploy Vertex AI Agent Runtime bound to the Ingress & Egress Gateways
+  - name: hashicorp/terraform:1.13
+    id: terraform-runtime
+    entrypoint: sh
     args:
-      - "-c"
+      - -c
       - |
+        cd terraform/runtime
         terraform init -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=agent-demo/runtime"
-        terraform plan \\
+        terraform apply -auto-approve \\
           -var="project_id=\${PROJECT_ID}" \\
+          -var="project_number=\${PROJECT_NUMBER}" \\
           -var="region=\${_REGION}" \\
-          -var="image_uri=\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/agent-repo/adk-agent:\${SHORT_SHA}" \\
-          -out=tfplan
-        terraform apply -auto-approve tfplan
-
-substitutions:
-  _REGION: "us-central1"
-  _TF_BUCKET: "\${PROJECT_ID}-terraform-state"`
-    },
-    {
-      filename: "bootstrap.sh",
-      language: "bash",
-      code: `export PROJECT_ID=$(gcloud config get-value project)
-export PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
-export REGION="us-central1"
-export TF_BUCKET="\${PROJECT_ID}-terraform-state"
-export CLOUDBUILD_SA="\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-
-# 1. Enable required Google Cloud APIs
-gcloud services enable \\
-  cloudbuild.googleapis.com cloudresourcemanager.googleapis.com \\
-  artifactregistry.googleapis.com iam.googleapis.com compute.googleapis.com \\
-  networkservices.googleapis.com networksecurity.googleapis.com \\
-  aiplatform.googleapis.com agentregistry.googleapis.com modelarmor.googleapis.com
-
-# 2. Create versioned Cloud Storage bucket for remote Terraform state
-gcloud storage buckets create "gs://\${TF_BUCKET}" --location="\${REGION}"
-gcloud storage buckets update "gs://\${TF_BUCKET}" --versioning
-
-# 3. Grant Cloud Build Service Account permissions to provision infra & deploy agents
-declare -a ROLES=(
-  "roles/storage.objectAdmin"
-  "roles/artifactregistry.admin"
-  "roles/resourcemanager.projectIamAdmin"
-  "roles/iam.serviceAccountAdmin"
-  "roles/iam.serviceAccountUser"
-  "roles/compute.networkAdmin"
-  "roles/networkservices.admin"
-  "roles/aiplatform.admin"
-  "roles/modelarmor.admin"
-)
-for ROLE in "\${ROLES[@]}"; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \\
-    --member="serviceAccount:$CLOUDBUILD_SA" --role="$ROLE" --no-user-output-enabled
-done
-
-# 4. Trigger the Cloud Build CI/CD pipeline
-gcloud builds submit --config=cloudbuild.yaml \\
-  --substitutions=_REGION="\${REGION}",_TF_BUCKET="\${TF_BUCKET}" .`
+          -var="image_tag=\${_IMAGE_TAG}" \\
+          -var="ingress_gateway_id=\$(cat /workspace/ingress_gateway_id)" \\
+          -var="egress_gateway_id=\$(cat /workspace/egress_gateway_id)"`
     }
   ],
   links: [

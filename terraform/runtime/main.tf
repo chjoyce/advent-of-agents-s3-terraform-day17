@@ -1,94 +1,153 @@
-# ==============================================================================
-# STAGE 2: SINGLE AGENT RUNTIME PROVISIONING (Vertex AI Agent Runtime + SPIFFE)
-# ==============================================================================
+terraform {
+  required_version = ">= 1.5.0"
 
-data "google_project" "project" {
-  project_id = var.project_id
+  required_providers {
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = ">= 7.45.0"
+    }
+  }
+
+  backend "gcs" {}
+}
+
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
 }
 
 locals {
-  image_uri = "${var.region}-docker.pkg.dev/${var.project_id}/${var.repository_name}/${var.agent_name}:${var.image_tag}"
-
-  # Standard ADK operations exposed by AdkApp over the Agent Runtime Contract
-  adk_class_methods = [
-    { "name" = "get_session", "api_mode" = "" },
-    { "name" = "list_sessions", "api_mode" = "" },
-    { "name" = "create_session", "api_mode" = "" },
-    { "name" = "delete_session", "api_mode" = "" },
-    { "name" = "async_get_session", "api_mode" = "async" },
-    { "name" = "async_list_sessions", "api_mode" = "async" },
-    { "name" = "async_create_session", "api_mode" = "async" },
-    { "name" = "async_delete_session", "api_mode" = "async" },
-    { "name" = "stream_query", "api_mode" = "stream" },
-    { "name" = "async_stream_query", "api_mode" = "async_stream" },
+  class_methods = [
+    {
+      name     = "get_session"
+      api_mode = ""
+    },
+    {
+      name     = "list_sessions"
+      api_mode = ""
+    },
+    {
+      name     = "create_session"
+      api_mode = ""
+    },
+    {
+      name     = "delete_session"
+      api_mode = ""
+    },
+    {
+      name     = "async_get_session"
+      api_mode = "async"
+    },
+    {
+      name     = "async_list_sessions"
+      api_mode = "async"
+    },
+    {
+      name     = "async_create_session"
+      api_mode = "async"
+    },
+    {
+      name     = "async_delete_session"
+      api_mode = "async"
+    },
+    {
+      name     = "stream_query"
+      api_mode = "stream"
+    },
+    {
+      name     = "async_stream_query"
+      api_mode = "async_stream"
+    },
+    {
+      name     = "streaming_agent_run_with_events"
+      api_mode = "async_stream"
+    }
   ]
 }
 
-# 1. Ensure Vertex AI Reasoning Engine Service Agent can pull from Artifact Registry
-resource "google_project_iam_member" "re_service_agent_ar_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+# ---------------------------------------------------------
+# Force creation of Vertex AI Service Identity / P4SA
+# ---------------------------------------------------------
+resource "google_project_service_identity" "vertex_agent" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "aiplatform.googleapis.com"
 }
 
-# 2. Provision the Single ADK Agent on Vertex AI Agent Runtime
+# ---------------------------------------------------------
+# Ensure the primary Vertex AI Service Identity is initialized
+# ---------------------------------------------------------
+resource "google_project_service_identity" "vertex_primary_identity" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "aiplatform.googleapis.com"
+}
+
+# ---------------------------------------------------------
+# Give Vertex AI Service Agent permission to get and use Agent Gateways
+# ---------------------------------------------------------
+resource "google_project_iam_member" "vertex_gateway_verifier" {
+  project = var.project_id
+  role    = "roles/networkservices.admin"
+  member  = "serviceAccount:service-${var.project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+
+  # Wait for the primary service agent identity to exist
+  depends_on = [
+    google_project_service_identity.vertex_primary_identity
+  ]
+}
+
+# ---------------------------------------------------------
+# Give Agent Runtime permission to pull our image
+# ---------------------------------------------------------
+resource "google_project_iam_member" "runtime_artifact_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:service-${var.project_number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+  # CRITICAL: Wait for Vertex identity to be provisioned before setting policy
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
+
+# ---------------------------------------------------------
+# Agent Runtime (routed through Ingress & Egress Agent Gateways)
+# ---------------------------------------------------------
 resource "google_vertex_ai_reasoning_engine" "agent" {
   provider     = google-beta
-  display_name = var.agent_name
-  description  = "Single ADK Agent provisioned declaratively via Terraform and deployed by Cloud Build"
   project      = var.project_id
   region       = var.region
+  display_name = "terraform-demo-agent"
+  description  = "ADK agent deployed through Terraform and Cloud Build behind Agent Gateway and Model Armor"
 
   spec {
     agent_framework = "google-adk"
 
-    # Provisions a cryptographic W3C / SPIFFE Agent Identity (principal://...)
+    # Mints a cryptographic SPIFFE-based Agent Identity rather than a shared service account.
     identity_type = "AGENT_IDENTITY"
 
-    # Deploys the exact immutable container image built by Cloud Build
     container_spec {
-      image_uri = local.image_uri
+      image_uri = "${var.region}-docker.pkg.dev/${var.project_id}/${var.repository_name}/demo-agent:${var.image_tag}"
     }
 
+    class_methods = jsonencode(local.class_methods)
+
+    # Route the agent through the Client-to-Agent (Ingress) and Agent-to-Anywhere (Egress) Agent Gateways.
     deployment_spec {
-      min_instances         = 1
-      max_instances         = 4
-      container_concurrency = 9
-
-      resource_limits = {
-        cpu    = "2"
-        memory = "4Gi"
-      }
-
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.region
-      }
-      env {
-        name  = "GOOGLE_GENAI_USE_VERTEXAI"
-        value = "TRUE"
-      }
-      env {
-        name  = "MODEL"
-        value = var.model_name
-      }
-      env {
-        name  = "IMAGE_TAG"
-        value = var.image_tag
-      }
-      env {
-        name  = "MODEL_ARMOR_TEMPLATE_ID"
-        value = var.model_armor_template_id
+      agent_gateway_config {
+        client_to_agent_config {
+          agent_gateway = var.ingress_gateway_id
+        }
+        agent_to_anywhere_config {
+          agent_gateway = var.egress_gateway_id
+        }
       }
     }
-
-    class_methods = jsonencode(local.adk_class_methods)
   }
 
-  # Prevent IMAGE_PULL_BACKOFF race condition during initial deployment
-  depends_on = [google_project_iam_member.re_service_agent_ar_reader]
+  depends_on = [
+    google_project_iam_member.vertex_gateway_verifier,
+    google_project_iam_member.runtime_artifact_reader,
+  ]
 }

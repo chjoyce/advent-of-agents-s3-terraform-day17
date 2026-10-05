@@ -1,82 +1,102 @@
-# ==============================================================================
-# Advent of Agents S3 (Day 17) — Production CI/CD Pipeline (cloudbuild.yaml)
-# Deploys Foundation Infra -> Builds & Pushes Agent Image -> Applies Agent Runtime
-# ==============================================================================
+steps:
+
+# ============================================================
+# 1. Create foundation infrastructure (VPC, Agent Gateways,
+#    Model Armor templates, Authz Extensions & Policies)
+# ============================================================
+
+- name: hashicorp/terraform:1.13
+  id: terraform-foundation
+  entrypoint: sh
+  args:
+    - -c
+    - |
+      set -e
+
+      cd terraform/foundation
+
+      terraform init \
+        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="prefix=agent-demo/foundation"
+
+      terraform apply \
+        -auto-approve \
+        -var="project_id=${PROJECT_ID}" \
+        -var="region=${_REGION}"
+
+      # Save outputs so the runtime phase can bind the Agent Runtime to the Gateways.
+      terraform output -raw ingress_gateway_id > /workspace/ingress_gateway_id
+      terraform output -raw egress_gateway_id > /workspace/egress_gateway_id
+
+
+# ============================================================
+# 2. Build the agent container
+# ============================================================
+
+- name: gcr.io/cloud-builders/docker
+  id: build-agent
+  waitFor:
+    - terraform-foundation
+  args:
+    - build
+    - -t
+    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${_IMAGE_TAG}
+    - ./agent
+
+
+# ============================================================
+# 3. Push the container to Artifact Registry
+# ============================================================
+
+- name: gcr.io/cloud-builders/docker
+  id: push-agent
+  waitFor:
+    - build-agent
+  args:
+    - push
+    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${_IMAGE_TAG}
+
+
+# ============================================================
+# 4. Deploy/update Agent Runtime with Terraform
+# ============================================================
+
+- name: hashicorp/terraform:1.13
+  id: terraform-runtime
+  waitFor:
+    - push-agent
+  entrypoint: sh
+  args:
+    - -c
+    - |
+      set -e
+
+      cd terraform/runtime
+
+      # Pass foundation outputs into runtime Terraform.
+      cat > runtime.auto.tfvars <<EOF
+      project_id = "${PROJECT_ID}"
+      project_number = "${PROJECT_NUMBER}"
+      region = "${_REGION}"
+      image_tag = "${_IMAGE_TAG}"
+      repository_name = "agent-images"
+      ingress_gateway_id = "$(cat /workspace/ingress_gateway_id)"
+      egress_gateway_id = "$(cat /workspace/egress_gateway_id)"
+      EOF
+
+      terraform init \
+        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="prefix=agent-demo/runtime"
+
+      terraform apply \
+        -auto-approve
+
 
 substitutions:
-  _REGION: "us-central1"
-  _REPO_NAME: "agent-repo"
-  _AGENT_NAME: "day17-adk-ops-agent"
-  _IMAGE_TAG: "v1.0.0"
+  _REGION: us-central1
+  _TF_BUCKET: ${PROJECT_ID}-terraform-state
+  _IMAGE_TAG: manual
+
 
 options:
   logging: CLOUD_LOGGING_ONLY
-
-steps:
-  # 1. Provision / Verify Foundation Infrastructure (Artifact Registry, IAM, VPC, Model Armor)
-  - id: "terraform-foundation"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/foundation"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        terraform init \
-          -backend-config="bucket=${PROJECT_ID}-terraform-state" \
-          -backend-config="prefix=agent-demo/foundation"
-        terraform plan \
-          -var="project_id=${PROJECT_ID}" \
-          -var="region=${_REGION}" \
-          -var="repository_name=${_REPO_NAME}" \
-          -out=tfplan
-        terraform apply -auto-approve tfplan
-
-  # 2. Build the Single ADK Agent Container Image stamped with _IMAGE_TAG
-  - id: "build-agent-image"
-    name: "gcr.io/cloud-builders/docker"
-    waitFor: ["terraform-foundation"]
-    args:
-      - "build"
-      - "-t"
-      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_AGENT_NAME}:${_IMAGE_TAG}"
-      - "."
-
-  # 3. Push the Immutable Container Image to Artifact Registry
-  - id: "push-agent-image"
-    name: "gcr.io/cloud-builders/docker"
-    waitFor: ["build-agent-image"]
-    args:
-      - "push"
-      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_AGENT_NAME}:${_IMAGE_TAG}"
-
-  # 4. Initialize GCS Remote State & Plan the Single Agent Runtime Deployment
-  - id: "terraform-runtime-plan"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/runtime"
-    waitFor: ["push-agent-image"]
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        terraform init \
-          -backend-config="bucket=${PROJECT_ID}-terraform-state" \
-          -backend-config="prefix=agent-demo/runtime"
-        terraform plan \
-          -var="project_id=${PROJECT_ID}" \
-          -var="region=${_REGION}" \
-          -var="repository_name=${_REPO_NAME}" \
-          -var="agent_name=${_AGENT_NAME}" \
-          -var="image_tag=${_IMAGE_TAG}" \
-          -out=tfplan
-
-  # 5. Apply Terraform Plan to Deploy the Single Agent to Vertex AI Agent Runtime
-  - id: "terraform-runtime-apply"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/runtime"
-    waitFor: ["terraform-runtime-plan"]
-    args:
-      - "apply"
-      - "-auto-approve"
-      - "tfplan"

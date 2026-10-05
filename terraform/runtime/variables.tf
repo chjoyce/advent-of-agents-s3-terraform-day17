@@ -1,40 +1,37 @@
 variable "project_id" {
   type        = string
-  description = "Google Cloud Project ID"
+  description = "Google Cloud project ID."
+}
+
+variable "project_number" {
+  type        = string
+  description = "Google Cloud project number."
 }
 
 variable "region" {
   type        = string
+  description = "Google Cloud region."
   default     = "us-central1"
-  description = "Google Cloud region to deploy Vertex AI Agent Runtime"
-}
-
-variable "repository_name" {
-  type        = string
-  default     = "agent-repo"
-  description = "Artifact Registry Docker repository name (created in terraform/foundation)"
-}
-
-variable "agent_name" {
-  type        = string
-  default     = "day17-adk-ops-agent"
-  description = "Display name and container image name for the single ADK agent"
 }
 
 variable "image_tag" {
   type        = string
-  default     = "v1.0.0"
-  description = "Immutable container image tag built and pushed by Cloud Build"
+  description = "Container image tag to deploy."
+  default     = "manual"
 }
 
-variable "model_name" {
+variable "repository_name" {
   type        = string
-  default     = "gemini-2.5-flash"
-  description = "Gemini model used by the ADK agent"
+  description = "Artifact Registry repository name."
+  default     = "agent-images"
 }
 
-variable "model_armor_template_id" {
+variable "ingress_gateway_id" {
   type        = string
-  default     = "agent-demo-safety-template"
-  description = "Model Armor template ID provisioned in terraform/foundation"
+  description = "Client-to-Agent Agent Gateway resource ID."
+}
+
+variable "egress_gateway_id" {
+  type        = string
+  description = "Agent-to-Anywhere Agent Gateway resource ID."
 }

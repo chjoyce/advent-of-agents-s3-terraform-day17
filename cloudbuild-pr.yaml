@@ -1,62 +1,60 @@
-# ==============================================================================
-# Advent of Agents S3 (Day 17) — Pull Request Dry-Run Pipeline (cloudbuild-pr.yaml)
-# Verifies Docker Build + Runs Terraform Plan on Foundation & Runtime (No Apply!)
-# ==============================================================================
+steps:
+
+# ============================================================
+# 1. Plan foundation infrastructure (Pull Request verification)
+# ============================================================
+
+- name: hashicorp/terraform:1.13
+  id: terraform-foundation-plan
+  entrypoint: sh
+  args:
+    - -c
+    - |
+      set -e
+      cd terraform/foundation
+
+      terraform init \
+        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="prefix=agent-demo/foundation"
+
+      terraform validate
+      terraform plan \
+        -var="project_id=${PROJECT_ID}" \
+        -var="region=${_REGION}"
+
+
+# ============================================================
+# 2. Plan runtime infrastructure (Pull Request verification)
+# ============================================================
+
+- name: hashicorp/terraform:1.13
+  id: terraform-runtime-plan
+  waitFor:
+    - terraform-foundation-plan
+  entrypoint: sh
+  args:
+    - -c
+    - |
+      set -e
+      cd terraform/runtime
+
+      terraform init \
+        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="prefix=agent-demo/runtime"
+
+      terraform validate
+      terraform plan \
+        -var="project_id=${PROJECT_ID}" \
+        -var="project_number=${PROJECT_NUMBER}" \
+        -var="region=${_REGION}" \
+        -var="image_tag=${SHORT_SHA}" \
+        -var="repository_name=agent-images" \
+        -var="ingress_gateway_id=projects/${PROJECT_ID}/locations/${_REGION}/agentGateways/agent-demo-ingress" \
+        -var="egress_gateway_id=projects/${PROJECT_ID}/locations/${_REGION}/agentGateways/agent-demo-egress"
 
 substitutions:
-  _REGION: "us-central1"
-  _REPO_NAME: "agent-repo"
-  _AGENT_NAME: "day17-adk-ops-agent"
-  _IMAGE_TAG: "pr-preview"
+  _REGION: us-central1
+  _TF_BUCKET: ${PROJECT_ID}-terraform-state
 
 options:
   logging: CLOUD_LOGGING_ONLY
-
-steps:
-  # 1. Verify the Single ADK Agent Dockerfile Builds Cleanly
-  - id: "verify-docker-build"
-    name: "gcr.io/cloud-builders/docker"
-    args:
-      - "build"
-      - "-t"
-      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_AGENT_NAME}:${_IMAGE_TAG}"
-      - "."
-
-  # 2. Validate & Plan Foundation Infrastructure (Dry-Run Only)
-  - id: "terraform-foundation-plan"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/foundation"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        terraform fmt -check
-        terraform init \
-          -backend-config="bucket=${PROJECT_ID}-terraform-state" \
-          -backend-config="prefix=agent-demo/foundation"
-        terraform plan \
-          -var="project_id=${PROJECT_ID}" \
-          -var="region=${_REGION}" \
-          -var="repository_name=${_REPO_NAME}"
-
-  # 3. Validate & Plan Agent Runtime Provisioning (Dry-Run Only)
-  - id: "terraform-runtime-plan"
-    name: "hashicorp/terraform:1.9"
-    dir: "terraform/runtime"
-    waitFor: ["terraform-foundation-plan"]
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        terraform fmt -check
-        terraform init \
-          -backend-config="bucket=${PROJECT_ID}-terraform-state" \
-          -backend-config="prefix=agent-demo/runtime"
-        terraform plan \
-          -var="project_id=${PROJECT_ID}" \
-          -var="region=${_REGION}" \
-          -var="repository_name=${_REPO_NAME}" \
-          -var="agent_name=${_AGENT_NAME}" \
-          -var="image_tag=${_IMAGE_TAG}"
