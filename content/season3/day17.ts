@@ -150,29 +150,24 @@ gcloud builds submit --config=cloudbuild.yaml \\
   ],
   links: [
     {
-      label: "Day 17 Code Kata: Terraform + Cloud Build Agent Demo",
+      label: "Day 17 Code Kata",
       url: "https://github.com/chjoyce/advent-of-agents-s3-terraform-day17",
-      description: "Reproducible two-stage Terraform (foundation + runtime) and Cloud Build pipeline for deploying an ADK agent on Google Cloud."
+      description: "Terraform and Cloud Build agent deployment demo."
     },
     {
       label: "Provision Agents with Terraform",
       url: "https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/runtime/use-terraform",
-      description: "Deploy and manage Agent Runtime containers, SPIFFE identities, and Agent Gateways declaratively using Terraform."
+      description: "Deploy Agent Runtimes, identities, and gateways."
     },
     {
-      label: "Managing IaC with Terraform, Cloud Build, and GitOps",
+      label: "Terraform & Cloud Build GitOps",
       url: "https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code",
-      description: "Automate terraform init, plan, and apply workflows on pull requests and merges using Cloud Build triggers."
+      description: "Automate Terraform plan and apply in CI/CD."
     },
     {
-      label: "Ensuring Scale and Compliance of Terraform Deployments with Cloud Build",
-      url: "https://cloud.google.com/blog/products/devops-sre/terraform-gitops-with-google-cloud-build-and-storage",
-      description: "Best practices for remote state in Cloud Storage, branch isolation, and policy validation in Cloud Build."
-    },
-    {
-      label: "Terraform Support for Gemini Enterprise Agent Platform",
+      label: "Terraform for Agent Platform",
       url: "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/start/use-terraform-vertex-ai",
-      description: "Configure Terraform providers, IAM permissions, and Vertex AI resources on Google Cloud."
+      description: "Configure Terraform providers and Vertex AI resources."
     }
   ],
   description: `
@@ -191,9 +186,9 @@ Prototyping with \`agents-cli\` is great for speed, but production demands repro
 **Resources:**
 - [Provision Agents with Terraform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/runtime/use-terraform)
 - [Terraform on Google Cloud](https://docs.cloud.google.com/docs/terraform)
-- [Managing IaC with Terraform, Cloud Build, and GitOps](https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code)
-- [Ensuring scale and compliance of your Terraform deployment with Cloud Build](https://cloud.google.com/blog/products/devops-sre/terraform-gitops-with-google-cloud-build-and-storage)
-- [Terraform support for Gemini Enterprise Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/start/use-terraform-vertex-ai)
+- [Terraform & Cloud Build GitOps](https://docs.cloud.google.com/docs/terraform/resource-management/managing-infrastructure-as-code)
+- [Terraform Compliance with Cloud Build](https://cloud.google.com/blog/products/devops-sre/terraform-gitops-with-google-cloud-build-and-storage)
+- [Terraform for Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/start/use-terraform-vertex-ai)
 - [Terraform Blueprints Catalog](https://cloud.google.com/docs/terraform/blueprints/terraform-blueprints)
 `,
   videoURL: "TODO"
