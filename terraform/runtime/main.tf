@@ -243,8 +243,14 @@ resource "google_vertex_ai_reasoning_engine" "agent" {
     class_methods = jsonencode(local.class_methods)
 
     # Route the agent through the Client-to-Agent (Ingress) and Agent-to-Anywhere (Egress) Agent Gateways.
-    # Note: GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_QUOTA_PROJECT are automatically injected by Agent Engine.
+    # Note: GOOGLE_CLOUD_PROJECT (set to project number) and GOOGLE_CLOUD_QUOTA_PROJECT are reserved
+    # and automatically injected by Agent Engine. We pass GOOGLE_CLOUD_PROJECT_ID so the container
+    # has the string project ID without needing a Cloud Resource Manager gRPC lookup at startup.
     deployment_spec {
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project_id
+      }
       env {
         name  = "GOOGLE_CLOUD_LOCATION"
         value = var.region

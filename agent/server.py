@@ -20,8 +20,13 @@ from agent import root_agent
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("reasoning_engine_server")
 
-# Ensure project and location are configured for Vertex AI / google-genai SDK
-project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+# Ensure project and location are configured for Vertex AI / google-genai SDK.
+# Prefer GOOGLE_CLOUD_PROJECT_ID (non-numeric project ID) so neither vertexai.init()
+# nor AdkApp.project_id() attempts a gRPC Cloud Resource Manager lookup at cold start
+# behind the Egress Agent Gateway (b/561814776).
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT_ID") or os.environ.get(
+    "GOOGLE_CLOUD_PROJECT"
+)
 if not project_id:
   try:
     _, project_id = google.auth.default()
@@ -36,6 +41,7 @@ location = os.environ.get(
 )
 os.environ["GOOGLE_CLOUD_LOCATION"] = location
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
+os.environ.setdefault("GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false")
 
 if project_id:
   vertexai.init(project=project_id, location=location)
@@ -49,9 +55,14 @@ adk_app = agent_engines.AdkApp(
     session_service_builder=lambda: session_service,
     memory_service_builder=lambda: memory_service,
     artifact_service_builder=lambda: artifact_service,
+    instrumentor_builder=lambda *args, **kwargs: None,
     enable_tracing=False,
 )
-adk_app.set_up()
+adk_app.project_id = lambda: project_id
+try:
+  adk_app.set_up()
+except Exception as exc:
+  logger.warning("Deferred AdkApp.set_up() due to startup error: %s", exc)
 
 app = FastAPI(title="ADK Reasoning Engine Server")
 
