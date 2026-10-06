@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactService
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
+from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 import google.auth
 import vertexai
@@ -19,6 +20,15 @@ from agent import root_agent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("reasoning_engine_server")
+
+_orig_runner_init = Runner.__init__
+if "auto_create_session" not in inspect.signature(_orig_runner_init).parameters:
+
+  def _compat_runner_init(self, *args, **kwargs):
+    kwargs.pop("auto_create_session", None)
+    return _orig_runner_init(self, *args, **kwargs)
+
+  Runner.__init__ = _compat_runner_init
 
 # Ensure project and location are configured for Vertex AI / google-genai SDK.
 # Prefer GOOGLE_CLOUD_PROJECT_ID (non-numeric project ID) so neither vertexai.init()

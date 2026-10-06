@@ -1,4 +1,4 @@
 fastapi
 uvicorn
-google-adk[gcp]
+google-adk>=1.18.0
 google-cloud-aiplatform[adk,agent_engines]>=1.70.0
