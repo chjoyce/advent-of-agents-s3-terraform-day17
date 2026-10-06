@@ -101,7 +101,3 @@ steps:
 substitutions:
   _REGION: us-central1
   _TF_BUCKET: ${PROJECT_ID}-terraform-state
-
-
-options:
-  logging: CLOUD_LOGGING_ONLY
