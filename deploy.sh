@@ -71,6 +71,7 @@ echo ""
 echo "[Step 4/5] Granting IAM roles to Cloud Build Service Account (${CLOUDBUILD_SA})..."
 declare -a ROLES=(
   "roles/logging.logWriter"
+  "roles/modelarmor.admin"
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
   "roles/serviceusage.serviceUsageAdmin"
@@ -81,7 +82,6 @@ declare -a ROLES=(
   "roles/networkservices.admin"
   "roles/networksecurity.admin"
   "roles/aiplatform.admin"
-  "roles/modelarmor.admin"
 )
 
 for ROLE in "${ROLES[@]}"; do

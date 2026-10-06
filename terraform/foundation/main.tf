@@ -304,7 +304,8 @@ resource "google_model_armor_template" "agent_security" {
   }
 
   depends_on = [
-    google_project_service.apis
+    google_project_service.apis,
+    google_project_iam_member.dep_p4sa_roles,
   ]
 }
 
@@ -357,7 +358,8 @@ resource "google_model_armor_template" "security_responses" {
   }
 
   depends_on = [
-    google_project_service.apis
+    google_project_service.apis,
+    google_project_iam_member.dep_p4sa_roles,
   ]
 }
 
