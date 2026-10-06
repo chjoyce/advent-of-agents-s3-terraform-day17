@@ -1,6 +1,6 @@
 # Automate Production Agent Deployment with Terraform & Cloud Build
 
-> **[Google's Advent of Agents — Season 3 (Day 17)](https://adventofagents.com/2026/10/)**  
+> **[Google's Advent of Agents — Season 3 (Day 17)](https://adventofagents.com/2026/10/17)**  
 > Deploy a Google ADK agent to Google Cloud Agent Platform using a two-stage Terraform and Cloud Build pipeline, protected by Agent Gateway and Model Armor.
 
 ---
