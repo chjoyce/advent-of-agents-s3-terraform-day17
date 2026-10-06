@@ -61,6 +61,7 @@ gcloud storage buckets update \
 echo ""
 echo "3️⃣  Binding required IAM roles to Cloud Build Service Account (${CLOUDBUILD_SA})..."
 declare -a ROLES=(
+  "roles/logging.logWriter"
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
   "roles/serviceusage.serviceUsageAdmin"

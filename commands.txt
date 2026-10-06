@@ -42,6 +42,7 @@ terraform -chdir=terraform/runtime init -reconfigure \
 
 # 5. Bind IAM roles required for Cloud Build & Terraform Agent Deployment
 declare -a ROLES=(
+  "roles/logging.logWriter"
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
   "roles/serviceusage.serviceUsageAdmin"

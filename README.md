@@ -118,6 +118,7 @@ Grant the Cloud Build service account permission to provision the network, gatew
 
 ```bash
 declare -a ROLES=(
+  "roles/logging.logWriter"
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
   "roles/serviceusage.serviceUsageAdmin"
