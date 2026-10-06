@@ -105,29 +105,6 @@ resource "google_compute_subnetwork" "agent_subnet" {
   private_ip_google_access = true
 }
 
-# Allow egress to 240.0.0.0/4 (GCP PSC gateway Class E VIP range, e.g. 240.0.0.2).
-# Required for PSC egress interception to reach the Agent Gateway SWP.
-resource "google_compute_firewall" "psc_egress_vip_allow" {
-  name    = "agent-demo-psc-egress-vip-allow"
-  network = google_compute_network.agent_vpc.name
-  project = var.project_id
-
-  description = "Allow egress to 240.0.0.0/4 (GCP PSC gateway Class E VIP range) for Agent Gateway egress interception."
-  direction   = "EGRESS"
-  priority    = 900
-
-  allow {
-    protocol = "tcp"
-    ports    = ["443", "80"]
-  }
-
-  destination_ranges = ["240.0.0.0/4"]
-
-  depends_on = [
-    google_project_service.apis
-  ]
-}
-
 resource "google_compute_network_attachment" "agent_gateway" {
   provider = google-beta
 
