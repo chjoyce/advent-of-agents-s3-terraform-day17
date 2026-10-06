@@ -13,9 +13,9 @@ steps:
       set -e
       cd terraform/foundation
 
-      terraform init \
+      terraform init -reconfigure \
         -backend-config="bucket=${_TF_BUCKET}" \
-        -backend-config="prefix=agent-demo/foundation"
+        -backend-config="prefix=foundation"
 
       terraform validate
       terraform plan \
@@ -38,9 +38,9 @@ steps:
       set -e
       cd terraform/runtime
 
-      terraform init \
+      terraform init -reconfigure \
         -backend-config="bucket=${_TF_BUCKET}" \
-        -backend-config="prefix=agent-demo/runtime"
+        -backend-config="prefix=runtime"
 
       terraform validate
       terraform plan \

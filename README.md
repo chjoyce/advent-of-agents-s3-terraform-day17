@@ -34,8 +34,8 @@ User / Vertex AI Playground
 | :--- | :--- |
 | [`agent/agent.py`](agent/agent.py) | Simple ADK chatbot (`root_agent = Agent(name="terraform_demo_agent", model="gemini-2.5-flash", ...)`) ready to test in the Vertex AI Playground. |
 | [`agent/Dockerfile`](agent/Dockerfile) | Packages the ADK agent container running `adk api_server --host 0.0.0.0 --port 8080 .`. |
-| [`terraform/foundation/`](terraform/foundation/main.tf) | **Stage 1 Terraform**: Enables GCP APIs & Data Access Audit Logs, provisions Artifact Registry (`agent-images`), VPC (`agent-demo-vpc`), Subnet (`agent-demo-subnet`), PSC Egress VIP firewall (`240.0.0.0/4`), Network Attachment (`agent-demo-attachment`), **Ingress & Egress Agent Gateways** (`google_network_services_agent_gateway`), **Dual Model Armor Templates** (`agent-demo-security` & `agent-demo-security-responses`), and **Authz Extensions + Network Security Authz Policies** (`CONTENT_AUTHZ` + `REQUEST_AUTHZ`). |
-| [`terraform/runtime/`](terraform/runtime/main.tf) | **Stage 2 Terraform**: Provisions Vertex AI Service Identities (`gcp-sa-aiplatform`, `gcp-sa-aiplatform-re`), binds least-privilege IAM (`roles/networkservices.admin`, `roles/artifactregistry.reader`), and deploys `google_vertex_ai_reasoning_engine.agent` with `identity_type = "AGENT_IDENTITY"` (SPIFFE), Playground `class_methods`, and `agent_gateway_config` (`client_to_agent_config` + `agent_to_anywhere_config`). |
+| [`terraform/foundation/`](terraform/foundation/main.tf) | **Stage 1 Terraform** (GCS state: `gs://${TF_BUCKET}/foundation/`): Enables GCP APIs & Data Access Audit Logs, provisions Artifact Registry (`agent-images`), VPC (`agent-demo-vpc`), Subnet (`agent-demo-subnet`), PSC Egress VIP firewall (`240.0.0.0/4`), Network Attachment (`agent-demo-attachment`), **Ingress & Egress Agent Gateways** (`google_network_services_agent_gateway`), **Dual Model Armor Templates** (`agent-demo-security` & `agent-demo-security-responses`), and **Authz Extensions + Network Security Authz Policies** (`CONTENT_AUTHZ` + `REQUEST_AUTHZ`). |
+| [`terraform/runtime/`](terraform/runtime/main.tf) | **Stage 2 Terraform** (GCS state: `gs://${TF_BUCKET}/runtime/`): Provisions Vertex AI Service Identities (`gcp-sa-aiplatform`, `gcp-sa-aiplatform-re`), binds least-privilege IAM (`roles/networkservices.admin`, `roles/artifactregistry.reader`), and deploys `google_vertex_ai_reasoning_engine.agent` with `identity_type = "AGENT_IDENTITY"` (SPIFFE), Playground `class_methods`, and `agent_gateway_config` (`client_to_agent_config` + `agent_to_anywhere_config`). |
 | [`cloudbuild.yaml`](cloudbuild.yaml) | **Main Merge Pipeline**: Runs `terraform apply` in `terraform/foundation`, builds and pushes `./agent` to Artifact Registry, and runs `terraform apply` in `terraform/runtime`. |
 | [`cloudbuild-pr.yaml`](cloudbuild-pr.yaml) | **Pull Request Pipeline**: Runs `terraform init`, `terraform validate`, and `terraform plan` across both stages before merge. |
 | [`bootstrap.sh`](bootstrap.sh) / [`commands.txt`](commands.txt) | Automated script and copy-pasteable commands to enable APIs, create the versioned GCS state bucket, bind Cloud Build IAM roles, and initialize Terraform state. |
@@ -54,7 +54,7 @@ Verify the Terraform HCL syntax, provider schemas, and ADK agent configuration l
 
 ## ☁️ Option 2: Full Google Cloud Deployment (Step-by-Step Commands)
 
-You can run `./bootstrap.sh` to execute steps 1–5 automatically, or run the exact commands below (also in [`commands.txt`](commands.txt)).
+You can run `./bootstrap.sh` to execute steps 1–4 automatically, or copy-paste the commands below (also in [`commands.txt`](commands.txt)).
 
 ### 1. Set Environment Variables & Enable Required APIs
 
@@ -91,24 +91,18 @@ gcloud storage buckets update \
   --versioning
 ```
 
-### 3. Persist Terraform States in GCS
+### 3. Persist Terraform States in Separate `/foundation` and `/runtime` Folders in GCS
 
-Initialize remote state for both the `foundation` and `runtime` stages:
+Use `-chdir` and `-reconfigure` so each stage stores its state in its own folder (`gs://${TF_BUCKET}/foundation/default.tfstate` and `gs://${TF_BUCKET}/runtime/default.tfstate`) without `Error: Backend configuration changed` when switching projects or buckets:
 
 ```bash
-cd terraform/foundation
-
-terraform init \
+terraform -chdir=terraform/foundation init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
-  -backend-config="prefix=agent-demo/foundation"
+  -backend-config="prefix=foundation"
 
-cd ../runtime
-
-terraform init \
+terraform -chdir=terraform/runtime init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
-  -backend-config="prefix=agent-demo/runtime"
-
-cd ../..
+  -backend-config="prefix=runtime"
 ```
 
 ### 4. Grant Required IAM Roles to the Cloud Build Service Account
@@ -174,9 +168,6 @@ Once the Cloud Build pipeline finishes:
 To tear down the deployed resources:
 
 ```bash
-cd terraform/runtime
-terraform destroy -auto-approve
-
-cd ../foundation
-terraform destroy -auto-approve
+terraform -chdir=terraform/runtime destroy -auto-approve
+terraform -chdir=terraform/foundation destroy -auto-approve
 ```

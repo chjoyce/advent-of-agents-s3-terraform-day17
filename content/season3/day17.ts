@@ -115,7 +115,7 @@ resource "google_vertex_ai_reasoning_engine" "agent" {
       - -c
       - |
         cd terraform/foundation
-        terraform init -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=agent-demo/foundation"
+        terraform init -reconfigure -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=foundation"
         terraform apply -auto-approve -var="project_id=\${PROJECT_ID}" -var="region=\${_REGION}"
         terraform output -raw ingress_gateway_id > /workspace/ingress_gateway_id
         terraform output -raw egress_gateway_id > /workspace/egress_gateway_id
@@ -133,7 +133,7 @@ resource "google_vertex_ai_reasoning_engine" "agent" {
       - -c
       - |
         cd terraform/runtime
-        terraform init -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=agent-demo/runtime"
+        terraform init -reconfigure -backend-config="bucket=\${_TF_BUCKET}" -backend-config="prefix=runtime"
         terraform apply -auto-approve \\
           -var="project_id=\${PROJECT_ID}" \\
           -var="project_number=\${PROJECT_NUMBER}" \\

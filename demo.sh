@@ -16,6 +16,7 @@ cd "${ROOT_DIR}/terraform/foundation"
 terraform fmt -check
 terraform init -backend=false -input=false >/dev/null
 terraform validate
+rm -f .terraform/terraform.tfstate
 
 echo ""
 echo "🔍 [Step 2/3] Validating Stage 2: terraform/runtime (Vertex AI Agent Runtime + SPIFFE Identity + Gateway Routing)..."
@@ -23,6 +24,7 @@ cd "${ROOT_DIR}/terraform/runtime"
 terraform fmt -check
 terraform init -backend=false -input=false >/dev/null
 terraform validate
+rm -f .terraform/terraform.tfstate
 
 echo ""
 echo "🔍 [Step 3/3] Verifying ADK Chatbot Agent Definition (agent/agent.py & agent/Dockerfile)..."
