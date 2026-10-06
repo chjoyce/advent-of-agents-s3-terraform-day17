@@ -9,9 +9,12 @@ export CLOUDBUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 gcloud services enable \
   cloudbuild.googleapis.com \
   cloudresourcemanager.googleapis.com \
+  serviceusage.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
   iap.googleapis.com \
+  logging.googleapis.com \
+  monitoring.googleapis.com \
   compute.googleapis.com \
   networkservices.googleapis.com \
   networksecurity.googleapis.com \
@@ -41,6 +44,7 @@ terraform -chdir=terraform/runtime init -reconfigure \
 declare -a ROLES=(
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
+  "roles/serviceusage.serviceUsageAdmin"
   "roles/resourcemanager.projectIamAdmin"
   "roles/iam.serviceAccountAdmin"
   "roles/iam.serviceAccountUser"

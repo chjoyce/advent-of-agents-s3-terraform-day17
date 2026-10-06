@@ -14,13 +14,13 @@ User / Vertex AI Playground
        ▼
 ┌──────────────────────────────┐
 │    Ingress Agent Gateway     │  ◄── Model Armor Authz Policy (CONTENT_AUTHZ: Prompt & Response templates)
-│      (CLIENT_TO_AGENT)       │
+│      (CLIENT_TO_AGENT)       │      + Service Extensions P4SA (`gcp-sa-dep`) inline callout IAM
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
 │   Vertex AI Agent Runtime    │  ◄── ADK Conversational Agent (`agent/agent.py` + `agent/server.py`)
-│ (SPIFFE: AGENT_IDENTITY)     │      + Session & Streaming class_methods for Playground
+│ (SPIFFE: AGENT_IDENTITY)     │      + Principal IAM (`roles/aiplatform.user`, `serviceUsageConsumer`, `logWriter`)
 └──────────────┬───────────────┘
                │
                ▼
@@ -34,8 +34,8 @@ User / Vertex AI Playground
 | :--- | :--- |
 | [`agent/agent.py`](agent/agent.py) | Cheerful, friendly ADK conversational agent (`root_agent = Agent(name="terraform_demo_agent", model="gemini-2.5-flash", ...)`) ready to test in the Vertex AI Playground. |
 | [`agent/server.py`](agent/server.py) | FastAPI Reasoning Engine server exposing `/api/reasoning_engine` and `/api/stream_reasoning_engine` with in-memory session management. |
-| [`agent/Dockerfile`](agent/Dockerfile) | Packages the ADK agent container (`uvicorn server:app --host 0.0.0.0 --port 8080`) and installs the Egress Agent Gateway TLS inspection root CA. |
-| [`terraform/foundation/`](terraform/foundation/main.tf) | **Stage 1 Terraform** (GCS state: `gs://${TF_BUCKET}/agent-demo/foundation/`): Enables GCP APIs & Data Access Audit Logs, provisions Artifact Registry (`agent-images`), VPC (`agent-demo-vpc`), Subnet (`agent-demo-subnet`), Network Attachment (`agent-demo-attachment`), **Ingress & Egress Agent Gateways** (`google_network_services_agent_gateway`), **Dual Model Armor Templates** (`agent-demo-security` & `agent-demo-security-responses`), and **Authz Extension + Network Security Authz Policies**. |
+| [`agent/Dockerfile`](agent/Dockerfile) | Packages the ADK agent container (`uvicorn server:app --host 0.0.0.0 --port 8080`) and installs the Egress Agent Gateway TLS inspection root CA into both the system CA store and `certifi`. |
+| [`terraform/foundation/`](terraform/foundation/main.tf) | **Stage 1 Terraform** (GCS state: `gs://${TF_BUCKET}/agent-demo/foundation/`): Enables GCP APIs & Data Access Audit Logs, pre-provisions Vertex AI & DEP Service Agents + IAM, creates Artifact Registry (`agent-images`), VPC (`agent-demo-vpc`), Subnet (`agent-demo-subnet`), Network Attachment (`agent-demo-attachment`), **Ingress & Egress Agent Gateways** (`google_network_services_agent_gateway`), **Dual Model Armor Templates** (`agent-demo-security` & `agent-demo-security-responses`), and **Authz Extension + Network Security Authz Policies**. |
 | [`terraform/runtime/`](terraform/runtime/main.tf) | **Stage 2 Terraform** (GCS state: `gs://${TF_BUCKET}/agent-demo/runtime/`): Deploys `google_vertex_ai_reasoning_engine.agent` with `identity_type = "AGENT_IDENTITY"` (SPIFFE), Playground `class_methods`, `agent_gateway_config` (`client_to_agent_config` + `agent_to_anywhere_config`), and binds least-privilege IAM roles directly to `principal://${effective_identity}`. |
 | [`cloudbuild.yaml`](cloudbuild.yaml) | **Main Deployment Pipeline**: Runs `terraform apply` in `terraform/foundation`, exports gateway IDs and TLS root CA certs, builds and pushes `./agent` to Artifact Registry, and runs `terraform apply` in `terraform/runtime`. |
 | [`cloudbuild-pr.yaml`](cloudbuild-pr.yaml) | **Pull Request Pipeline**: Runs `terraform init`, `terraform validate`, and `terraform plan` across both stages before merge. |
@@ -69,9 +69,12 @@ export CLOUDBUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 gcloud services enable \
   cloudbuild.googleapis.com \
   cloudresourcemanager.googleapis.com \
+  serviceusage.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
   iap.googleapis.com \
+  logging.googleapis.com \
+  monitoring.googleapis.com \
   compute.googleapis.com \
   networkservices.googleapis.com \
   networksecurity.googleapis.com \
@@ -110,6 +113,7 @@ terraform -chdir=terraform/runtime init -reconfigure \
 declare -a ROLES=(
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
+  "roles/serviceusage.serviceUsageAdmin"
   "roles/resourcemanager.projectIamAdmin"
   "roles/iam.serviceAccountAdmin"
   "roles/iam.serviceAccountUser"
@@ -138,6 +142,61 @@ gcloud builds submit \
   --config=cloudbuild.yaml \
   --substitutions=_TF_BUCKET="${TF_BUCKET}",_REGION="${REGION}"
 ```
+
+---
+
+## 🔐 Complete IAM & Service Agent Reference (Why Each Role Is Required)
+
+Deploying an ADK agent with `identity_type = "AGENT_IDENTITY"` behind **Ingress & Egress Agent Gateways** and **Model Armor** involves **four distinct principals**. Missing any of these bindings causes deployment failures or runtime `403`/`404` errors in the Playground:
+
+### 1. Cloud Build Service Account (`${PROJECT_NUMBER}-compute@developer.gserviceaccount.com`)
+*Granted once during bootstrap (`bootstrap.sh` / Step 4 above) so Cloud Build can execute Terraform:*
+- `roles/storage.objectAdmin` — Read/write remote Terraform state in `gs://${TF_BUCKET}` and stage Cloud Build source archives.
+- `roles/artifactregistry.admin` — Create the `agent-images` Docker repository and push built agent images.
+- `roles/serviceusage.serviceUsageAdmin` — Enable Google Cloud APIs via `google_project_service`.
+- `roles/resourcemanager.projectIamAdmin` — Manage project IAM bindings (`google_project_iam_member`) and Data Access audit logs (`google_project_iam_audit_config`).
+- `roles/iam.serviceAccountAdmin` & `roles/iam.serviceAccountUser` — Provision Google-managed service identities (`google_project_service_identity`).
+- `roles/compute.networkAdmin` — Provision VPC, Subnet, and PSC Network Attachment.
+- `roles/networkservices.admin` — Provision Ingress & Egress Agent Gateways (`google_network_services_agent_gateway`) and Authz Extensions (`google_network_services_authz_extension`).
+- `roles/networksecurity.admin` — Provision `CONTENT_AUTHZ` and `REQUEST_AUTHZ` policies (`google_network_security_authz_policy`).
+- `roles/aiplatform.admin` — Create and update the Vertex AI Reasoning Engine (`google_vertex_ai_reasoning_engine`).
+- `roles/modelarmor.admin` — Create Model Armor prompt & response screening templates (`google_model_armor_template`).
+
+### 2. Vertex AI Service Agents (`gcp-sa-aiplatform` & `gcp-sa-aiplatform-re`)
+*Provisioned automatically by Terraform in [`terraform/foundation/main.tf`](terraform/foundation/main.tf) and [`terraform/runtime/main.tf`](terraform/runtime/main.tf):*
+- **`service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com`**:
+  - `roles/networkservices.admin` — Required so Vertex AI can verify and bind `agent_gateway_config` (`client_to_agent_config` & `agent_to_anywhere_config`) when deploying the Reasoning Engine.
+  - `roles/aiplatform.user` — Standard Vertex AI control-plane access.
+- **`service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`**:
+  - `roles/artifactregistry.reader` — Required so the Reasoning Engine serverless runtime can pull the custom container image from Artifact Registry.
+  - `roles/networkservices.admin` & `roles/aiplatform.user` — Required for runtime gateway attachment and Vertex AI access.
+
+### 3. Service Extensions / Data Egress Protection P4SA (`gcp-sa-dep`)
+*Provisioned automatically by Terraform in [`terraform/foundation/main.tf`](terraform/foundation/main.tf) (`google_project_iam_member.dep_p4sa_roles`):*
+- **`service-${PROJECT_NUMBER}@gcp-sa-dep.iam.gserviceaccount.com`**:
+  - `roles/modelarmor.user` & `roles/modelarmor.calloutUser` — Required so the Ingress Agent Gateway can invoke the Model Armor `AuthzExtension` inline callout (`forward_headers = ["authorization"]`). Without these roles, the gateway blocks Playground requests with `403`/`404`.
+  - `roles/serviceusage.serviceUsageConsumer` — Required for project quota validation during inline Model Armor callouts.
+  - `roles/compute.networkUser` & `roles/dns.peer` — Required for Egress Agent Gateway PSC network attachment connectivity.
+
+### 4. Agent Runtime SPIFFE Identity (`principal://agents.global.org-...`)
+*Provisioned automatically by Terraform in [`terraform/runtime/main.tf`](terraform/runtime/main.tf) (`google_project_iam_member.agent_identity_roles`):*
+- **`principal://${google_vertex_ai_reasoning_engine.agent.spec[0].effective_identity}`**:
+  - When `identity_type = "AGENT_IDENTITY"` is enabled, the agent container runs under a dedicated cryptographic SPIFFE identity rather than a shared IAM service account.
+  - `roles/aiplatform.user` & `roles/serviceusage.serviceUsageConsumer` — Required so the agent container can invoke Gemini models (`gemini-2.5-flash`) on Vertex AI. (In addition, the container sets `GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES="false"` so `google-auth` permits outbound Vertex AI calls using the SPIFFE workload token.)
+  - `roles/logging.logWriter` & `roles/monitoring.metricWriter` — Required so container stdout/stderr (`aiplatform.googleapis.com/reasoning_engine_stdout` and `reasoning_engine_stderr`) and telemetry are written to Cloud Logging and Cloud Monitoring.
+
+---
+
+## 🛠️ Key Production Gotchas Solved in This Repo
+
+1. **Egress Agent Gateway Default-Deny & TLS Inspection CA**:
+   - Attaching an `AGENT_TO_ANYWHERE` Egress Agent Gateway enforces a default-deny posture and intercepts outbound TLS traffic using a regional proxy CA (`agent_gateway_card[0].root_certificates`).
+   - [`terraform/foundation/main.tf`](terraform/foundation/main.tf) provisions `google_network_security_authz_policy.egress_allow_policy` (`REQUEST_AUTHZ` `ALLOW`), and [`cloudbuild.yaml`](cloudbuild.yaml) exports `egress_gateway_root_certificates` into `agent/agw_root_certs.crt` so [`agent/Dockerfile`](agent/Dockerfile) installs the CA into both `/etc/ssl/certs/ca-certificates.crt` (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`) and `certifi.where()`.
+2. **Reserved Environment Variables in `spec.deployment_spec.env`**:
+   - Vertex AI Agent Engine automatically injects `GOOGLE_CLOUD_PROJECT` (set to the numeric project number) and `GOOGLE_CLOUD_QUOTA_PROJECT`, and rejects deployments that specify `GOOGLE_CLOUD_PROJECT` in `spec.deployment_spec.env`.
+   - [`terraform/runtime/main.tf`](terraform/runtime/main.tf) instead passes `GOOGLE_CLOUD_PROJECT_ID = var.project_id`, and [`agent/server.py`](agent/server.py) maps it into `os.environ["GOOGLE_CLOUD_PROJECT"]` at startup so `AdkApp.set_up()` never attempts a cold-start gRPC lookup to Cloud Resource Manager (`projects.get`) behind the Egress Agent Gateway.
+3. **`google-adk` Package Extra Compatibility**:
+   - [`agent/requirements.txt`](agent/requirements.txt) specifies `google-adk>=1.18.0` (without the deprecated `google-adk[gcp]` extra, which forced `pip` to backtrack to `google-adk==1.14.1` and fail on `Runner(..., auto_create_session=True)`).
 
 ---
 

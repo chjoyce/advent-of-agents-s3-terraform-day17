@@ -31,13 +31,17 @@ locals {
     "aiplatform.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
     "iap.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
     "networkservices.googleapis.com",
     "networksecurity.googleapis.com",
     "agentregistry.googleapis.com",
     "modelarmor.googleapis.com",
+    "serviceusage.googleapis.com",
   ]
 
   dep_p4sa_roles = [

@@ -29,9 +29,12 @@ echo "1️⃣  Enabling required Google Cloud APIs..."
 gcloud services enable \
   cloudbuild.googleapis.com \
   cloudresourcemanager.googleapis.com \
+  serviceusage.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
   iap.googleapis.com \
+  logging.googleapis.com \
+  monitoring.googleapis.com \
   compute.googleapis.com \
   networkservices.googleapis.com \
   networksecurity.googleapis.com \
@@ -60,6 +63,7 @@ echo "3️⃣  Binding required IAM roles to Cloud Build Service Account (${CLOU
 declare -a ROLES=(
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
+  "roles/serviceusage.serviceUsageAdmin"
   "roles/resourcemanager.projectIamAdmin"
   "roles/iam.serviceAccountAdmin"
   "roles/iam.serviceAccountUser"
@@ -94,4 +98,4 @@ terraform -chdir="${ROOT_DIR}/terraform/runtime" init -reconfigure \
 
 echo ""
 echo "🎉 Bootstrap complete! Run the Cloud Build deployment pipeline with:"
-echo "   gcloud builds submit --config=cloudbuild.yaml --substitutions=_REGION=${REGION},_TF_BUCKET=${TF_BUCKET}"
+echo "   gcloud builds submit --config=cloudbuild.yaml --substitutions=_TF_BUCKET=${TF_BUCKET},_REGION=${REGION}"
