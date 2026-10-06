@@ -159,7 +159,8 @@ resource "google_artifact_registry_repository" "agent_images" {
   format        = "DOCKER"
 
   depends_on = [
-    google_project_service.apis
+    google_project_service.apis,
+    google_project_iam_member.dep_p4sa_roles,
   ]
 }
 
@@ -211,7 +212,8 @@ resource "google_network_services_agent_gateway" "ingress" {
   }
 
   depends_on = [
-    google_project_service.apis
+    google_project_service.apis,
+    google_compute_network_attachment.agent_gateway,
   ]
 }
 
