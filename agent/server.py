@@ -30,10 +30,6 @@ if "auto_create_session" not in inspect.signature(_orig_runner_init).parameters:
 
   Runner.__init__ = _compat_runner_init
 
-# Ensure project and location are configured for Vertex AI / google-genai SDK.
-# Prefer GOOGLE_CLOUD_PROJECT_ID (non-numeric project ID) so neither vertexai.init()
-# nor AdkApp.project_id() attempts a gRPC Cloud Resource Manager lookup at cold start
-# behind the Egress Agent Gateway (b/561814776).
 project_id = os.environ.get("GOOGLE_CLOUD_PROJECT_ID") or os.environ.get(
     "GOOGLE_CLOUD_PROJECT"
 )
@@ -106,22 +102,17 @@ async def handle_query(request: Request):
   try:
     body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
   except Exception as exc:
-    logger.error("Invalid JSON on /api/reasoning_engine: %s", exc)
     raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
 
   class_method = body.get("class_method") or "query"
   params: dict[str, Any] = dict(body.get("input") or {})
-  print(
-      f"[ReasoningEngine] POST /api/reasoning_engine class_method={class_method}"
-      f" keys={list(params.keys())}",
-      flush=True,
-  )
 
   try:
     if class_method in ("get_session", "async_get_session"):
-      user_id = params.get("user_id", "default_user")
-      session_id = params.get("session_id")
-      await _ensure_session(user_id=user_id, session_id=session_id)
+      await _ensure_session(
+          user_id=params.get("user_id", "default_user"),
+          session_id=params.get("session_id"),
+      )
       output = await adk_app.async_get_session(**params)
     elif class_method in ("list_sessions", "async_list_sessions"):
       output = await adk_app.async_list_sessions(**params)
@@ -139,21 +130,18 @@ async def handle_query(request: Request):
       await _ensure_session(
           user_id=user_id, session_id=params.get("session_id")
       )
-      events = []
-      async for event in adk_app.async_stream_query(**params):
-        events.append(event)
-      output = events
+      output = [event async for event in adk_app.async_stream_query(**params)]
     else:
       method = getattr(adk_app, class_method, None)
       if method is None:
         raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported class_method: {class_method}",
+            status_code=400, detail=f"Unsupported class_method: {class_method}"
         )
-      if inspect.iscoroutinefunction(method):
-        output = await method(**params)
-      else:
-        output = method(**params)
+      output = (
+          await method(**params)
+          if inspect.iscoroutinefunction(method)
+          else method(**params)
+      )
 
     return JSONResponse(content=jsonable_encoder({"output": output}))
   except HTTPException:
@@ -169,16 +157,10 @@ async def handle_stream_query(request: Request):
   try:
     body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
   except Exception as exc:
-    logger.error("Invalid JSON on /api/stream_reasoning_engine: %s", exc)
     raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
 
   class_method = body.get("class_method") or "async_stream_query"
   params: dict[str, Any] = dict(body.get("input") or {})
-  print(
-      "[ReasoningEngine] POST /api/stream_reasoning_engine"
-      f" class_method={class_method} keys={list(params.keys())}",
-      flush=True,
-  )
 
   async def _stream() -> AsyncIterator[str]:
     try:

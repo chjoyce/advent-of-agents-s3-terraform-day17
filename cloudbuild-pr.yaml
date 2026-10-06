@@ -15,7 +15,7 @@ steps:
 
       terraform init -reconfigure \
         -backend-config="bucket=${_TF_BUCKET}" \
-        -backend-config="prefix=foundation"
+        -backend-config="prefix=agent-demo/foundation"
 
       terraform validate
       terraform plan \
@@ -40,14 +40,14 @@ steps:
 
       terraform init -reconfigure \
         -backend-config="bucket=${_TF_BUCKET}" \
-        -backend-config="prefix=runtime"
+        -backend-config="prefix=agent-demo/runtime"
 
       terraform validate
       terraform plan \
         -var="project_id=${PROJECT_ID}" \
         -var="project_number=${PROJECT_NUMBER}" \
         -var="region=${_REGION}" \
-        -var="image_tag=${SHORT_SHA}" \
+        -var="image_tag=${BUILD_ID}" \
         -var="repository_name=agent-images" \
         -var="ingress_gateway_id=projects/${PROJECT_ID}/locations/${_REGION}/agentGateways/agent-demo-ingress" \
         -var="egress_gateway_id=projects/${PROJECT_ID}/locations/${_REGION}/agentGateways/agent-demo-egress"

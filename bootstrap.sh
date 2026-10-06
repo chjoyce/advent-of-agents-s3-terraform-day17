@@ -20,7 +20,7 @@ echo "🚀 Bootstrapping Day 17 Terraform + Cloud Build Agent Demo"
 echo "   PROJECT_ID     : ${PROJECT_ID}"
 echo "   PROJECT_NUMBER : ${PROJECT_NUMBER}"
 echo "   REGION         : ${REGION}"
-echo "   TF_BUCKET      : gs://${TF_BUCKET} (/foundation & /runtime)"
+echo "   TF_BUCKET      : gs://${TF_BUCKET} (agent-demo/foundation & agent-demo/runtime)"
 echo "   CLOUDBUILD_SA  : ${CLOUDBUILD_SA}"
 echo "=================================================================="
 
@@ -81,17 +81,17 @@ done
 echo "✅ All IAM roles successfully bound to Cloud Build Service Account!"
 
 echo ""
-echo "4️⃣  Initializing Terraform remote state in GCS (/foundation & /runtime)..."
+echo "4️⃣  Initializing Terraform remote state in GCS (agent-demo/foundation & agent-demo/runtime)..."
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 terraform -chdir="${ROOT_DIR}/terraform/foundation" init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
-  -backend-config="prefix=foundation"
+  -backend-config="prefix=agent-demo/foundation"
 
 terraform -chdir="${ROOT_DIR}/terraform/runtime" init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
-  -backend-config="prefix=runtime"
+  -backend-config="prefix=agent-demo/runtime"
 
 echo ""
 echo "🎉 Bootstrap complete! Run the Cloud Build deployment pipeline with:"
-echo "   gcloud builds submit --config=cloudbuild.yaml --substitutions=_REGION=${REGION},_TF_BUCKET=${TF_BUCKET},_IMAGE_TAG=v1"
+echo "   gcloud builds submit --config=cloudbuild.yaml --substitutions=_REGION=${REGION},_TF_BUCKET=${TF_BUCKET}"

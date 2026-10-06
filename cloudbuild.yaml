@@ -22,19 +22,8 @@ steps:
         -backend-config="bucket=$${TF_BUCKET}" \
         -backend-config="prefix=agent-demo/foundation"
 
-      PARALLELISM_FLAG=""
-      if terraform state list 2>/dev/null | grep -qE 'egress_iap_policy|egress_ma_policy'; then
-        PARALLELISM_FLAG="-parallelism=1"
-      fi
-
       terraform apply \
         -auto-approve \
-        $${PARALLELISM_FLAG} \
-        -var="project_id=${PROJECT_ID}" \
-        -var="region=$${REGION}" || \
-      terraform apply \
-        -auto-approve \
-        -parallelism=1 \
         -var="project_id=${PROJECT_ID}" \
         -var="region=$${REGION}"
 

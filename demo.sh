@@ -27,20 +27,24 @@ terraform validate
 rm -f .terraform/terraform.tfstate
 
 echo ""
-echo "🔍 [Step 3/3] Verifying ADK Chatbot Agent Definition (agent/agent.py & agent/Dockerfile)..."
+echo "🔍 [Step 3/3] Verifying ADK Chatbot Agent Definition (agent/agent.py, agent/server.py & agent/Dockerfile)..."
 cd "${ROOT_DIR}"
 python3 - << 'PYEOF'
 import ast
 from pathlib import Path
 
-src = Path("agent/agent.py").read_text()
-tree = ast.parse(src)
+agent_src = Path("agent/agent.py").read_text()
+server_src = Path("agent/server.py").read_text()
 dockerfile = Path("agent/Dockerfile").read_text()
 
-assert "root_agent" in src, "Missing root_agent definition in agent/agent.py"
-assert "adk" in dockerfile and "api_server" in dockerfile, "Missing adk api_server entrypoint in agent/Dockerfile"
+ast.parse(agent_src)
+ast.parse(server_src)
+
+assert "root_agent" in agent_src, "Missing root_agent definition in agent/agent.py"
+assert "/api/reasoning_engine" in server_src and "/api/stream_reasoning_engine" in server_src, "Missing Reasoning Engine routes in agent/server.py"
+assert "uvicorn" in dockerfile and "8080" in dockerfile, "Missing uvicorn entrypoint in agent/Dockerfile"
 print("   ✅ agent/agent.py defines 'root_agent' (terraform_demo_agent)")
-print("   ✅ agent/Dockerfile exposes ADK API server on 0.0.0.0:8080 for Vertex AI Playground")
+print("   ✅ agent/server.py & agent/Dockerfile expose Reasoning Engine server on 0.0.0.0:8080")
 PYEOF
 
 echo ""

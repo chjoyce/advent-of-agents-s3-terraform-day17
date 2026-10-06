@@ -228,7 +228,7 @@ resource "google_vertex_ai_reasoning_engine" "agent" {
   project      = var.project_id
   region       = var.region
   display_name = "terraform-demo-agent"
-  description  = "ADK agent deployed through Terraform and Cloud Build behind Agent Gateway and Model Armor"
+  description  = "A cheerful, friendly conversational ADK agent deployed with Terraform and Cloud Build"
 
   spec {
     agent_framework = "google-adk"

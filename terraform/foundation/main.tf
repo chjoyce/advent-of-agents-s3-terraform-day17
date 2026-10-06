@@ -199,8 +199,8 @@ resource "google_compute_network_attachment" "agent_gateway" {
 resource "google_network_services_agent_gateway" "ingress" {
   provider = google-beta
 
-  name      = "agent-demo-ingress"
-  location  = var.region
+  name     = "agent-demo-ingress"
+  location = var.region
 
   google_managed {
     governed_access_path = "CLIENT_TO_AGENT"
@@ -214,8 +214,8 @@ resource "google_network_services_agent_gateway" "ingress" {
 resource "google_network_services_agent_gateway" "egress" {
   provider = google-beta
 
-  name      = "agent-demo-egress"
-  location  = var.region
+  name     = "agent-demo-egress"
+  location = var.region
 
   google_managed {
     governed_access_path = "AGENT_TO_ANYWHERE"
