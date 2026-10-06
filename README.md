@@ -54,12 +54,15 @@ Deploys the agent container and runs on every code update:
 
 ## Quickstart (Google Cloud Shell)
 
-Clone the repository and open the project directory:
+Clone the repository and run the end-to-end deployment script (which executes Steps 1–5 below):
 
 ```bash
 git clone https://github.com/chjoyce/advent-of-agents-s3-terraform-day17.git
 cd advent-of-agents-s3-terraform-day17
+./deploy.sh
 ```
+
+Or run each step manually:
 
 ### Step 1: Set Variables & Enable APIs
 
