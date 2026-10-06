@@ -122,17 +122,17 @@ Grant the Cloud Build service account permission to provision the network, gatew
 ```bash
 declare -a ROLES=(
   "roles/logging.logWriter"
-  "roles/modelarmor.admin"
   "roles/storage.objectAdmin"
-  "roles/artifactregistry.admin"
   "roles/serviceusage.serviceUsageAdmin"
   "roles/resourcemanager.projectIamAdmin"
-  "roles/iam.serviceAccountAdmin"
-  "roles/iam.serviceAccountUser"
   "roles/compute.networkAdmin"
   "roles/networkservices.admin"
+  "roles/artifactregistry.admin"
+  "roles/modelarmor.admin"
   "roles/networksecurity.admin"
   "roles/aiplatform.admin"
+  "roles/iam.serviceAccountAdmin"
+  "roles/iam.serviceAccountUser"
 )
 
 for ROLE in "${ROLES[@]}"; do
@@ -140,6 +140,7 @@ for ROLE in "${ROLES[@]}"; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$CLOUDBUILD_SA" \
     --role="$ROLE" \
+    --condition=None \
     --no-user-output-enabled
 done
 ```

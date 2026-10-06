@@ -153,6 +153,7 @@ resource "google_project_iam_member" "runtime_aiplatform_user" {
 # ------------------------------------------------------------------------------
 
 resource "google_artifact_registry_repository" "agent_images" {
+  project       = var.project_id
   location      = var.region
   repository_id = "agent-images"
   description   = "Container images for Agent Runtime"
