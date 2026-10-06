@@ -24,9 +24,11 @@ steps:
         -var="project_id=${PROJECT_ID}" \
         -var="region=${_REGION}"
 
-      # Save outputs so the runtime phase can bind the Agent Runtime to the Gateways.
+      # Save outputs so the runtime phase can bind the Agent Runtime to the Gateways
+      # and the container build can trust the Egress Agent Gateway TLS inspection root CA.
       terraform output -raw ingress_gateway_id > /workspace/ingress_gateway_id
       terraform output -raw egress_gateway_id > /workspace/egress_gateway_id
+      terraform output -raw egress_gateway_root_certificates > /workspace/agent/agw_root_certs.crt || true
 
 
 # ============================================================

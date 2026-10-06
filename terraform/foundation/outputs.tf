@@ -28,6 +28,11 @@ output "egress_gateway_id" {
   value       = google_network_services_agent_gateway.egress.id
 }
 
+output "egress_gateway_root_certificates" {
+  description = "Root certificates for the Egress Agent Gateway TLS inspection proxy."
+  value       = join("\n", try(google_network_services_agent_gateway.egress.agent_gateway_card[0].root_certificates, []))
+}
+
 output "model_armor_template_id" {
   description = "Primary Model Armor prompt security template ID."
   value       = google_model_armor_template.agent_security.id
@@ -43,7 +48,7 @@ output "ingress_ma_policy_id" {
   value       = google_network_security_authz_policy.ingress_ma_policy.id
 }
 
-output "egress_ma_policy_id" {
-  description = "Egress Model Armor CONTENT_AUTHZ policy ID."
-  value       = google_network_security_authz_policy.egress_ma_policy.id
+output "egress_allow_policy_id" {
+  description = "Egress Agent Gateway REQUEST_AUTHZ allow policy ID."
+  value       = google_network_security_authz_policy.egress_allow_policy.id
 }

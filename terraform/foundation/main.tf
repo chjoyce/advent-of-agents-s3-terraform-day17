@@ -39,6 +39,14 @@ locals {
     "agentregistry.googleapis.com",
     "modelarmor.googleapis.com",
   ]
+
+  dep_p4sa_roles = [
+    "roles/modelarmor.user",
+    "roles/modelarmor.calloutUser",
+    "roles/serviceusage.serviceUsageConsumer",
+    "roles/compute.networkUser",
+    "roles/dns.peer",
+  ]
 }
 
 # ------------------------------------------------------------------------------
@@ -96,6 +104,16 @@ resource "google_project_iam_member" "vertex_gateway_verifier" {
   ]
 }
 
+resource "google_project_iam_member" "vertex_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
+
 resource "google_project_iam_member" "runtime_artifact_reader" {
   project = var.project_id
   role    = "roles/artifactregistry.reader"
@@ -106,7 +124,25 @@ resource "google_project_iam_member" "runtime_artifact_reader" {
   ]
 }
 
+resource "google_project_iam_member" "runtime_gateway_verifier" {
+  project = var.project_id
+  role    = "roles/networkservices.admin"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
 
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
+
+resource "google_project_iam_member" "runtime_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
 
 # ------------------------------------------------------------------------------
 # 2. Artifact Registry
@@ -124,7 +160,7 @@ resource "google_artifact_registry_repository" "agent_images" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. VPC, Subnet, PSC Egress VIP Firewall & Network Attachment
+# 3. VPC, Subnet & Network Attachment
 # ------------------------------------------------------------------------------
 
 resource "google_compute_network" "agent_vpc" {
@@ -198,11 +234,26 @@ resource "google_network_services_agent_gateway" "egress" {
   ]
 }
 
+# Grant the Service Extensions / Data Egress Protection (DEP) Service Agent
+# permissions to invoke Model Armor inline callouts and use project quota.
+resource "google_project_iam_member" "dep_p4sa_roles" {
+  for_each = toset(local.dep_p4sa_roles)
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${coalesce(try(google_network_services_agent_gateway.ingress.agent_gateway_card[0].service_extensions_service_account, null), "service-${data.google_project.current.number}@gcp-sa-dep.iam.gserviceaccount.com")}"
+
+  depends_on = [
+    google_network_services_agent_gateway.ingress,
+    google_network_services_agent_gateway.egress,
+  ]
+}
+
 # ------------------------------------------------------------------------------
 # 5. Model Armor Security Templates (Prompt & Response Screening)
 # ------------------------------------------------------------------------------
 
-# Template 1: High-sensitivity screening for user prompts (ingress) and outbound tool calls
+# Template 1: High-sensitivity screening for user prompts (ingress)
 resource "google_model_armor_template" "agent_security" {
   project     = var.project_id
   location    = var.region
@@ -255,7 +306,7 @@ resource "google_model_armor_template" "agent_security" {
   ]
 }
 
-# Template 2: Response screening for LLM outputs returning via the Egress Gateway
+# Template 2: Response screening for LLM outputs
 resource "google_model_armor_template" "security_responses" {
   project     = var.project_id
   location    = var.region
@@ -309,40 +360,18 @@ resource "google_model_armor_template" "security_responses" {
 }
 
 # ------------------------------------------------------------------------------
-# 6. Model Armor Authz Extensions & Content Authz Policies on Agent Gateways
+# 6. Model Armor Authz Extension & Policies on Ingress & Egress Gateways
 # ------------------------------------------------------------------------------
 
 resource "google_network_services_authz_extension" "ma_extension_ingress" {
-  provider  = google-beta
-  name      = "agent-demo-ma-extension-ingress"
-  location  = var.region
-  project   = var.project_id
-  service   = "modelarmor.${var.region}.rep.googleapis.com"
-  timeout   = "3s"
-  fail_open = var.ma_ingress_fail_open
-
-  metadata = {
-    model_armor_settings = jsonencode([
-      {
-        request_template_id = google_model_armor_template.agent_security.id
-      }
-    ])
-  }
-
-  depends_on = [
-    google_project_service.apis,
-    google_model_armor_template.agent_security,
-  ]
-}
-
-resource "google_network_services_authz_extension" "ma_extension_egress" {
-  provider  = google-beta
-  name      = "agent-demo-ma-extension-egress"
-  location  = var.region
-  project   = var.project_id
-  service   = "modelarmor.${var.region}.rep.googleapis.com"
-  timeout   = "3s"
-  fail_open = true
+  provider        = google-beta
+  name            = "agent-demo-ma-extension-ingress"
+  location        = var.region
+  project         = var.project_id
+  service         = "modelarmor.${var.region}.rep.googleapis.com"
+  timeout         = "3s"
+  fail_open       = var.ma_ingress_fail_open
+  forward_headers = ["authorization"]
 
   metadata = {
     model_armor_settings = jsonencode([
@@ -357,6 +386,7 @@ resource "google_network_services_authz_extension" "ma_extension_egress" {
     google_project_service.apis,
     google_model_armor_template.agent_security,
     google_model_armor_template.security_responses,
+    google_project_iam_member.dep_p4sa_roles,
   ]
 }
 
@@ -379,139 +409,27 @@ resource "google_network_security_authz_policy" "ingress_ma_policy" {
   }
 }
 
-resource "google_network_security_authz_policy" "egress_ma_policy" {
+# Allow outbound calls from the Agent Runtime through the Egress Agent Gateway
+# to Vertex AI / Gemini models, Cloud Logging, and Telemetry endpoints.
+resource "google_network_security_authz_policy" "egress_allow_policy" {
   provider       = google-beta
-  name           = "agent-demo-ma-egress-policy"
+  name           = "agent-demo-egress-allow-policy"
   location       = var.region
   project        = var.project_id
-  action         = "CUSTOM"
-  policy_profile = "CONTENT_AUTHZ"
+  action         = "ALLOW"
+  policy_profile = "REQUEST_AUTHZ"
 
   target {
     resources = [google_network_services_agent_gateway.egress.id]
-  }
-
-  custom_provider {
-    authz_extension {
-      resources = [google_network_services_authz_extension.ma_extension_egress.id]
-    }
   }
 
   http_rules {
     to {
       operations {
-        hosts {
-          suffix = ".aiplatform.googleapis.com"
-        }
         paths {
-          contains    = "generatecontent"
-          ignore_case = true
-        }
-        paths {
-          contains    = "predict"
-          ignore_case = true
-        }
-        paths {
-          contains    = "streamquery"
-          ignore_case = true
-        }
-        paths {
-          contains    = "sessions"
-          ignore_case = true
-        }
-        paths {
-          contains    = "events"
-          ignore_case = true
+          prefix = "/"
         }
       }
     }
   }
-}
-
-# ------------------------------------------------------------------------------
-# 7. IAP Request Authz Extensions & Policies (DRY_RUN for Playground Visibility)
-# ------------------------------------------------------------------------------
-
-resource "google_network_services_authz_extension" "iap_extension_ingress" {
-  provider  = google-beta
-  name      = "agent-demo-iap-extension-ingress"
-  location  = var.region
-  project   = var.project_id
-  service   = "iap.googleapis.com"
-  timeout   = "1s"
-  fail_open = true
-
-  metadata = {
-    iapPolicyVersion   = "V1"
-    iamEnforcementMode = "DRY_RUN"
-  }
-
-  depends_on = [
-    google_project_service.apis
-  ]
-}
-
-resource "google_network_services_authz_extension" "iap_extension_egress" {
-  provider  = google-beta
-  name      = "agent-demo-iap-extension-egress"
-  location  = var.region
-  project   = var.project_id
-  service   = "iap.googleapis.com"
-  timeout   = "1s"
-  fail_open = true
-
-  metadata = {
-    iapPolicyVersion   = "V1"
-    iamEnforcementMode = "DRY_RUN"
-  }
-
-  depends_on = [
-    google_project_service.apis
-  ]
-}
-
-resource "google_network_security_authz_policy" "ingress_iap_policy" {
-  provider       = google-beta
-  name           = "agent-demo-iap-ingress-policy"
-  location       = var.region
-  project        = var.project_id
-  action         = "CUSTOM"
-  policy_profile = "REQUEST_AUTHZ"
-
-  target {
-    resources = [google_network_services_agent_gateway.ingress.id]
-  }
-
-  custom_provider {
-    authz_extension {
-      resources = [google_network_services_authz_extension.iap_extension_ingress.id]
-    }
-  }
-
-  depends_on = [
-    google_network_services_authz_extension.iap_extension_ingress
-  ]
-}
-
-resource "google_network_security_authz_policy" "egress_iap_policy" {
-  provider       = google-beta
-  name           = "agent-demo-iap-egress-policy"
-  location       = var.region
-  project        = var.project_id
-  action         = "CUSTOM"
-  policy_profile = "REQUEST_AUTHZ"
-
-  target {
-    resources = [google_network_services_agent_gateway.egress.id]
-  }
-
-  custom_provider {
-    authz_extension {
-      resources = [google_network_services_authz_extension.iap_extension_egress.id]
-    }
-  }
-
-  depends_on = [
-    google_network_services_authz_extension.iap_extension_egress
-  ]
 }

@@ -1,0 +1,2 @@
+# Placeholder for Egress Agent Gateway TLS inspection root certificates.
+# Populated automatically during Cloud Build Step 1 from Terraform outputs.
