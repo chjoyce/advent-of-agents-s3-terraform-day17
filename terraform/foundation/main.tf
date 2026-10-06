@@ -201,7 +201,6 @@ resource "google_network_services_agent_gateway" "ingress" {
 
   name      = "agent-demo-ingress"
   location  = var.region
-  protocols = ["MCP"]
 
   google_managed {
     governed_access_path = "CLIENT_TO_AGENT"
@@ -217,7 +216,6 @@ resource "google_network_services_agent_gateway" "egress" {
 
   name      = "agent-demo-egress"
   location  = var.region
-  protocols = ["MCP"]
 
   google_managed {
     governed_access_path = "AGENT_TO_ANYWHERE"

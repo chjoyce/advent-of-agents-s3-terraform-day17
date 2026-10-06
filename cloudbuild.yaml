@@ -20,7 +20,7 @@ steps:
 
       terraform init -reconfigure \
         -backend-config="bucket=$${TF_BUCKET}" \
-        -backend-config="prefix=foundation"
+        -backend-config="prefix=agent-demo/foundation"
 
       terraform apply \
         -auto-approve \
@@ -100,7 +100,7 @@ steps:
 
       terraform init -reconfigure \
         -backend-config="bucket=$${TF_BUCKET}" \
-        -backend-config="prefix=runtime"
+        -backend-config="prefix=agent-demo/runtime"
 
       terraform apply \
         -auto-approve
