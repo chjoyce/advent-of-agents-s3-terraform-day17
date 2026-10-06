@@ -40,7 +40,7 @@ steps:
   args:
     - build
     - -t
-    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${_IMAGE_TAG}
+    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}
     - ./agent
 
 
@@ -54,7 +54,7 @@ steps:
     - build-agent
   args:
     - push
-    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${_IMAGE_TAG}
+    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}
 
 
 # ============================================================
@@ -78,7 +78,7 @@ steps:
       project_id = "${PROJECT_ID}"
       project_number = "${PROJECT_NUMBER}"
       region = "${_REGION}"
-      image_tag = "${_IMAGE_TAG}"
+      image_tag = "${BUILD_ID}"
       repository_name = "agent-images"
       ingress_gateway_id = "$(cat /workspace/ingress_gateway_id)"
       egress_gateway_id = "$(cat /workspace/egress_gateway_id)"
@@ -95,7 +95,6 @@ steps:
 substitutions:
   _REGION: us-central1
   _TF_BUCKET: ${PROJECT_ID}-terraform-state
-  _IMAGE_TAG: manual
 
 
 options:
