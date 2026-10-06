@@ -69,6 +69,45 @@ resource "google_project_iam_audit_config" "vertex_data_access_logs" {
   ]
 }
 
+# Pre-create the Vertex AI Service Agents (gcp-sa-aiplatform & gcp-sa-aiplatform-re)
+# and bind their IAM roles during Stage 1 so IAM propagation finishes while
+# Cloud Build builds and pushes the container image in Steps 2 & 3.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+resource "google_project_service_identity" "vertex_agent" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "aiplatform.googleapis.com"
+
+  depends_on = [
+    google_project_service.apis
+  ]
+}
+
+resource "google_project_iam_member" "vertex_gateway_verifier" {
+  project = var.project_id
+  role    = "roles/networkservices.admin"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
+
+resource "google_project_iam_member" "runtime_artifact_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service_identity.vertex_agent
+  ]
+}
+
+
+
 # ------------------------------------------------------------------------------
 # 2. Artifact Registry
 # ------------------------------------------------------------------------------

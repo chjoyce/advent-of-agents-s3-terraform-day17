@@ -75,15 +75,6 @@ resource "google_project_service_identity" "vertex_agent" {
 }
 
 # ---------------------------------------------------------
-# Ensure the primary Vertex AI Service Identity is initialized
-# ---------------------------------------------------------
-resource "google_project_service_identity" "vertex_primary_identity" {
-  provider = google-beta
-  project  = var.project_id
-  service  = "aiplatform.googleapis.com"
-}
-
-# ---------------------------------------------------------
 # Give Vertex AI Service Agent permission to get and use Agent Gateways
 # ---------------------------------------------------------
 resource "google_project_iam_member" "vertex_gateway_verifier" {
@@ -93,7 +84,7 @@ resource "google_project_iam_member" "vertex_gateway_verifier" {
 
   # Wait for the primary service agent identity to exist
   depends_on = [
-    google_project_service_identity.vertex_primary_identity
+    google_project_service_identity.vertex_agent
   ]
 }
 
