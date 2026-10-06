@@ -1,7 +1,7 @@
 # Automate Production Agent Deployment with Terraform & Cloud Build
 
 > **Google's Advent of Agents — Season 3 (Day 17)**  
-> Deploy a Google ADK agent to Vertex AI Agent Engine using a two-stage Terraform and Cloud Build pipeline, protected by Agent Gateway and Model Armor.
+> Deploy a Google ADK agent to Google Cloud Agent Platform using a two-stage Terraform and Cloud Build pipeline, protected by Agent Gateway and Model Armor.
 
 ---
 
@@ -10,7 +10,7 @@
 Instead of putting everything into one giant Terraform file, this project splits infrastructure into **two stages** (stored in separate folders in the same GCS state bucket) and automates them with **Cloud Build** (`cloudbuild.yaml`):
 
 ```text
-User / Vertex AI Playground
+User / Agent Playground
        │
        ▼
 ┌──────────────────────────────┐
@@ -20,7 +20,7 @@ User / Vertex AI Playground
                │
                ▼
 ┌──────────────────────────────┐
-│   Vertex AI Agent Runtime    │  ◄── ADK Agent (`agent/agent.py` + `agent/server.py`)
+│        Agent Runtime         │  ◄── ADK Agent (`agent/agent.py` + `agent/server.py`)
 │  (SPIFFE: AGENT_IDENTITY)    │
 └──────────────┬───────────────┘
                │
@@ -47,7 +47,7 @@ Packages your Python ADK agent (`agent/`):
 
 ### 3. Stage 2 — `terraform/runtime` (Agent Deployment)
 Deploys the agent container and runs on every code update:
-- **Vertex AI Agent Engine**: Deploys `terraform-demo-agent` using the new container image and connects it to the Ingress and Egress Gateways from Stage 1.
+- **Agent Runtime**: Deploys `terraform-demo-agent` using the new container image and connects it to the Ingress and Egress Gateways from Stage 1.
 - **Agent Identity (`AGENT_IDENTITY`)**: Assigns the agent its own cryptographic SPIFFE identity (`principal://...`) and grants it permissions to call Gemini (`roles/aiplatform.user`) and write logs (`roles/logging.logWriter`).
 
 ---
@@ -114,7 +114,7 @@ terraform -chdir=terraform/runtime init -reconfigure \
 
 ### Step 4: Grant Permissions to Cloud Build
 
-Grant the Cloud Build service account permission to provision the network, gateways, Model Armor templates, and Agent Engine runtime:
+Grant the Cloud Build service account permission to provision the network, gateways, Model Armor templates, and Agent Runtime:
 
 ```bash
 declare -a ROLES=(
@@ -154,7 +154,7 @@ gcloud builds submit \
 
 ## Test Your Agent in the Playground
 
-1. In the Google Cloud Console, go to **Vertex AI → Agent Engine**.
+1. In the Google Cloud Console, go to **Agent Platform → Agents → Deployments**.
 2. Click on **`terraform-demo-agent`**.
 3. Open the **Playground** tab and send a message to chat with your agent.
 
