@@ -1,44 +1,47 @@
-# Day 17: Deploy an ADK Agent with Terraform and Cloud Build
+# Automate Production Agent Deployment with Terraform & Cloud Build
 
-Deploy a containerized Google ADK agent to Vertex AI Agent Engine using a two-stage Terraform pipeline (`terraform/foundation` and `terraform/runtime`) and Cloud Build, governed by Ingress and Egress Agent Gateways, Model Armor, and SPIFFE (`AGENT_IDENTITY`).
+> **Google's Advent of Agents — Season 3 (Day 17)**  
+> Minimal, copy-pasteable two-stage Terraform (`terraform/foundation` and `terraform/runtime`) and Cloud Build pipeline to deploy a containerized ADK agent behind Agent Gateway and Model Armor.
 
-## Architecture
+## What Terraform Provisions
 
-```text
-Vertex AI Playground
-       │
-       ▼
-Ingress Agent Gateway (CLIENT_TO_AGENT)  + Model Armor (CONTENT_AUTHZ)
-       │
-       ▼
-Vertex AI Agent Runtime (AGENT_IDENTITY) + ADK Agent (agent/agent.py, agent/server.py)
-       │
-       ▼
-Egress Agent Gateway (AGENT_TO_ANYWHERE) + PSC Attachment & TLS Inspection CA
-```
+The deployment is split into two Terraform stages with separate remote state prefixes in Cloud Storage (`agent-demo/foundation` and `agent-demo/runtime`), orchestrated end-to-end by `cloudbuild.yaml`:
 
-### Repository Layout
+### Stage 1: `terraform/foundation` (Network, Gateways & Security Policy)
+1. **APIs & Audit Logs** — Enables required Google Cloud APIs and configures Vertex AI Data Access audit logs (`DATA_READ` and `DATA_WRITE`).
+2. **Service Agents & IAM** — Provisions the Vertex AI (`gcp-sa-aiplatform`, `gcp-sa-aiplatform-re`) and Service Extensions (`gcp-sa-dep`) service agents and grants permissions for gateway verification, image pulls, and inline Model Armor callouts (`roles/modelarmor.user`, `roles/modelarmor.calloutUser`, `roles/serviceusage.serviceUsageConsumer`).
+3. **Artifact Registry** — Creates the `agent-images` Docker repository.
+4. **VPC & PSC Network Attachment** — Creates `agent-demo-vpc`, `agent-demo-subnet` (`10.10.0.0/24`), and `agent-demo-attachment` (`ACCEPT_AUTOMATIC`).
+5. **Ingress & Egress Agent Gateways** — Provisions `agent-demo-ingress` (`CLIENT_TO_AGENT`) and `agent-demo-egress` (`AGENT_TO_ANYWHERE`, bound to the PSC network attachment).
+6. **Model Armor & Authz Policies** — Creates prompt (`agent-demo-security`) and response (`agent-demo-security-responses`) screening templates, attaches the Model Armor `AuthzExtension` + `CONTENT_AUTHZ` policy to the Ingress Gateway, and attaches a `REQUEST_AUTHZ` `ALLOW` policy to the Egress Gateway.
 
-- `agent/` — ADK agent (`agent.py`), FastAPI Reasoning Engine server (`server.py`), and `Dockerfile`.
-- `terraform/foundation/` — Stage 1: APIs, audit logs, Artifact Registry, VPC/subnet/PSC attachment, Ingress & Egress Agent Gateways, Model Armor templates, and Authz policies.
-- `terraform/runtime/` — Stage 2: Vertex AI Reasoning Engine (`identity_type = "AGENT_IDENTITY"`), gateway bindings, and SPIFFE principal IAM.
-- `cloudbuild.yaml` — Applies `foundation`, builds & pushes `./agent`, and applies `runtime`.
-- `cloudbuild-pr.yaml` — Runs `terraform validate` and `terraform plan` for pull requests.
-- `bootstrap.sh` / `commands.txt` — One-time project bootstrap commands.
+### Container Build (`cloudbuild.yaml`)
+- Exports `ingress_gateway_id`, `egress_gateway_id`, and `egress_gateway_root_certificates` from Stage 1, installs the Egress Gateway TLS inspection CA into the `./agent` image (`Dockerfile`), and pushes `demo-agent:${BUILD_ID}` to Artifact Registry.
+
+### Stage 2: `terraform/runtime` (Agent Engine & SPIFFE Identity)
+1. **Vertex AI Reasoning Engine** — Deploys `terraform-demo-agent` from the container image pushed by Cloud Build, registers ADK session/streaming `class_methods` for the Vertex AI Playground, and binds `agent_gateway_config` (`client_to_agent_config` + `agent_to_anywhere_config`).
+2. **SPIFFE Agent Identity (`AGENT_IDENTITY`)** — Mints a per-agent cryptographic identity (`principal://agents.global.org-...`) and binds least-privilege runtime roles (`roles/aiplatform.user`, `roles/serviceusage.serviceUsageConsumer`, `roles/logging.logWriter`, `roles/monitoring.metricWriter`) so the agent can call Gemini (`gemini-2.5-flash`) and emit logs.
 
 ---
 
-## Walkthrough
+## Quickstart
 
-### 1. Set Variables and Enable APIs
+Clone the repository and run the deployment in Cloud Shell:
 
 ```bash
+git clone https://github.com/chjoyce/advent-of-agents-s3-terraform-day17.git
+cd advent-of-agents-s3-terraform-day17
+```
+
+```bash
+# 1. Set project variables
 export PROJECT_ID=$(gcloud config get-value project)
 export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 export REGION="us-central1"
 export TF_BUCKET="${PROJECT_ID}-terraform-state"
 export CLOUDBUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
+# 2. Enable required APIs
 gcloud services enable \
   cloudbuild.googleapis.com \
   cloudresourcemanager.googleapis.com \
@@ -54,18 +57,11 @@ gcloud services enable \
   aiplatform.googleapis.com \
   agentregistry.googleapis.com \
   modelarmor.googleapis.com
-```
 
-### 2. Create the Terraform State Bucket
-
-```bash
+# 3. Create versioned GCS bucket and initialize Terraform state
 gcloud storage buckets create "gs://${TF_BUCKET}" --location="${REGION}"
 gcloud storage buckets update "gs://${TF_BUCKET}" --versioning
-```
 
-### 3. Initialize Terraform Backends
-
-```bash
 terraform -chdir=terraform/foundation init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
   -backend-config="prefix=agent-demo/foundation"
@@ -73,11 +69,8 @@ terraform -chdir=terraform/foundation init -reconfigure \
 terraform -chdir=terraform/runtime init -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
   -backend-config="prefix=agent-demo/runtime"
-```
 
-### 4. Grant IAM Roles to Cloud Build
-
-```bash
+# 4. Grant IAM roles to the Cloud Build service account
 declare -a ROLES=(
   "roles/storage.objectAdmin"
   "roles/artifactregistry.admin"
@@ -98,44 +91,18 @@ for ROLE in "${ROLES[@]}"; do
     --role="$ROLE" \
     --no-user-output-enabled
 done
-```
 
-### 5. Run the Cloud Build Pipeline
-
-```bash
+# 5. Deploy foundation, build container, and deploy agent runtime
 gcloud builds submit \
   --config=cloudbuild.yaml \
   --substitutions=_TF_BUCKET="${TF_BUCKET}",_REGION="${REGION}"
 ```
 
-### 6. Test in the Playground
+## Verify & Cleanup
 
-1. Open **Vertex AI > Agent Engine** in the Cloud Console.
-2. Select **`terraform-demo-agent`** and open the **Playground** tab.
-3. Send a test prompt to verify responses through the Ingress and Egress Agent Gateways.
+Open **Vertex AI > Agent Engine** in the Cloud Console, select **`terraform-demo-agent`**, and test the agent in the **Playground** tab.
 
----
-
-## Service Agent & Runtime IAM (Managed by Terraform)
-
-In addition to the Cloud Build roles in Step 4, Terraform binds the following service-agent and workload roles automatically:
-
-| Principal | Roles | Purpose |
-| :--- | :--- | :--- |
-| `service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com` | `roles/networkservices.admin`, `roles/aiplatform.user` | Verify and attach `agent_gateway_config` during deployment. |
-| `service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/artifactregistry.reader`, `roles/networkservices.admin`, `roles/aiplatform.user` | Pull the agent image from Artifact Registry and attach gateways. |
-| `service-${PROJECT_NUMBER}@gcp-sa-dep.iam.gserviceaccount.com` | `roles/modelarmor.user`, `roles/modelarmor.calloutUser`, `roles/serviceusage.serviceUsageConsumer`, `roles/compute.networkUser`, `roles/dns.peer` | Execute inline Model Armor `AuthzExtension` callouts and attach to the PSC network. |
-| `principal://${effective_identity}` (SPIFFE `AGENT_IDENTITY`) | `roles/aiplatform.user`, `roles/serviceusage.serviceUsageConsumer`, `roles/logging.logWriter`, `roles/monitoring.metricWriter` | Allow the agent container to call Gemini (`gemini-2.5-flash`) and write logs/metrics. |
-
-### Implementation Notes
-
-- **Egress Gateway TLS & Default-Deny**: `AGENT_TO_ANYWHERE` gateways default to deny and intercept TLS. `terraform/foundation` adds a `REQUEST_AUTHZ` `ALLOW` policy, and `cloudbuild.yaml` exports `egress_gateway_root_certificates` into `agent/agw_root_certs.crt` so `agent/Dockerfile` installs the proxy CA into `/etc/ssl/certs/ca-certificates.crt` and `certifi`.
-- **Reserved Env Vars**: `GOOGLE_CLOUD_PROJECT` is reserved by Agent Engine (which sets it to the numeric project number). `terraform/runtime` passes `GOOGLE_CLOUD_PROJECT_ID` instead so `server.py` avoids a cold-start Cloud Resource Manager gRPC lookup behind the Egress Gateway.
-- **SPIFFE Token Sharing**: `GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES="false"` is set on the runtime container so `google-auth` allows outbound Vertex AI calls with the SPIFFE workload identity.
-
----
-
-## Teardown
+To tear down all resources:
 
 ```bash
 terraform -chdir=terraform/runtime destroy -auto-approve
