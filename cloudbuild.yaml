@@ -13,16 +13,19 @@ steps:
     - |
       set -e
 
+      TF_BUCKET="${_TF_BUCKET:-${PROJECT_ID}-terraform-state}"
+      REGION="${_REGION:-us-central1}"
+
       cd terraform/foundation
 
       terraform init -reconfigure \
-        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="bucket=$${TF_BUCKET}" \
         -backend-config="prefix=foundation"
 
       terraform apply \
         -auto-approve \
         -var="project_id=${PROJECT_ID}" \
-        -var="region=${_REGION}"
+        -var="region=$${REGION}"
 
       # Save outputs so the runtime phase can bind the Agent Runtime to the Gateways
       # and the container build can trust the Egress Agent Gateway TLS inspection root CA.
@@ -39,11 +42,13 @@ steps:
   id: build-agent
   waitFor:
     - terraform-foundation
+  entrypoint: sh
   args:
-    - build
-    - -t
-    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}
-    - ./agent
+    - -c
+    - |
+      set -e
+      REGION="${_REGION:-us-central1}"
+      docker build -t "$${REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}" ./agent
 
 
 # ============================================================
@@ -54,9 +59,13 @@ steps:
   id: push-agent
   waitFor:
     - build-agent
+  entrypoint: sh
   args:
-    - push
-    - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}
+    - -c
+    - |
+      set -e
+      REGION="${_REGION:-us-central1}"
+      docker push "$${REGION}-docker.pkg.dev/${PROJECT_ID}/agent-images/demo-agent:${BUILD_ID}"
 
 
 # ============================================================
@@ -73,13 +82,16 @@ steps:
     - |
       set -e
 
+      TF_BUCKET="${_TF_BUCKET:-${PROJECT_ID}-terraform-state}"
+      REGION="${_REGION:-us-central1}"
+
       cd terraform/runtime
 
       # Pass foundation outputs into runtime Terraform.
       cat > runtime.auto.tfvars <<EOF
       project_id = "${PROJECT_ID}"
       project_number = "${PROJECT_NUMBER}"
-      region = "${_REGION}"
+      region = "$${REGION}"
       image_tag = "${BUILD_ID}"
       repository_name = "agent-images"
       ingress_gateway_id = "$(cat /workspace/ingress_gateway_id)"
@@ -87,7 +99,7 @@ steps:
       EOF
 
       terraform init -reconfigure \
-        -backend-config="bucket=${_TF_BUCKET}" \
+        -backend-config="bucket=$${TF_BUCKET}" \
         -backend-config="prefix=runtime"
 
       terraform apply \
